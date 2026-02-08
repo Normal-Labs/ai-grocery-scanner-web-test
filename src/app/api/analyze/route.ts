@@ -156,10 +156,12 @@ export async function POST(request: NextRequest) {
     // Step 5: Return 500 error if API key missing
     // Requirement 9.4: Return error when API key is missing
     if (!apiKey) {
+      // Debug: Log available environment variables (without exposing values)
       console.error('[API Error]', {
         timestamp: new Date().toISOString(),
         endpoint: '/api/analyze',
         error: 'Missing GOOGLE_GENERATIVE_AI_API_KEY environment variable',
+        availableEnvVars: Object.keys(process.env).filter(key => key.includes('GOOGLE') || key.includes('API')),
         statusCode: 500
       });
 
