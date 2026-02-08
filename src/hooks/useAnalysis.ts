@@ -195,7 +195,7 @@ export function useAnalysis(): UseAnalysisReturn {
         }
 
         // Validate all five insight categories are present
-        const requiredCategories = ['health', 'sustainability', 'carbon', 'preservatives', 'allergies'];
+        const requiredCategories = ['health', 'preservatives', 'allergies', 'sustainability', 'carbon'];
         for (const category of requiredCategories) {
           const insight = product.insights[category as keyof typeof product.insights];
           

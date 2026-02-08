@@ -36,7 +36,7 @@ export default function InsightsDisplay({ results, tier = 'premium', dimension }
   const categoriesToDisplay: InsightCategory[] =
     tier === 'free' && dimension
       ? [dimension]
-      : ['health', 'sustainability', 'carbon', 'preservatives', 'allergies'];
+      : ['health', 'preservatives', 'allergies', 'sustainability', 'carbon'];
 
   return (
     <div 

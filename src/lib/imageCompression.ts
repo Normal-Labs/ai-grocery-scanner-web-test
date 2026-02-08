@@ -12,11 +12,12 @@ import imageCompression from 'browser-image-compression';
  * - Max dimension: 1024px (sufficient for label reading)
  * - Quality: 0.8 (good balance between quality and size)
  * - Format: JPEG (smaller than PNG for photos)
+ * - Web Worker disabled to comply with CSP restrictions
  */
 const COMPRESSION_OPTIONS = {
   maxSizeMB: 0.5, // Max file size in MB
   maxWidthOrHeight: 1024, // Max dimension in pixels
-  useWebWorker: true, // Use web worker for better performance
+  useWebWorker: false, // Disabled to comply with CSP (blob URLs violate script-src)
   fileType: 'image/jpeg' as const,
   initialQuality: 0.8, // JPEG quality
 };
@@ -30,7 +31,7 @@ const COMPRESSION_OPTIONS = {
 export async function compressImage(base64Image: string): Promise<string> {
   try {
     // Convert base64 to File (required by browser-image-compression)
-    const file = await base64ToFile(base64Image);
+    const file = base64ToFile(base64Image);
     
     // Compress the image
     const compressedBlob = await imageCompression(file, COMPRESSION_OPTIONS);
@@ -48,15 +49,35 @@ export async function compressImage(base64Image: string): Promise<string> {
 
 /**
  * Convert base64 string to File object
+ * Uses native browser APIs (atob, Uint8Array, Blob) to comply with CSP restrictions
  */
-async function base64ToFile(base64: string): Promise<File> {
-  const response = await fetch(base64);
-  const blob = await response.blob();
+function base64ToFile(base64: string): File {
+  // 1. Parse the data URL to extract MIME type and base64 content
+  const parts = base64.split(',');
+  if (parts.length !== 2) {
+    throw new Error('Invalid base64 data URL format');
+  }
   
-  // Extract mime type from base64 string
-  const mimeType = base64.split(';')[0].split(':')[1] || 'image/jpeg';
+  const header = parts[0]; // e.g., "data:image/jpeg;base64"
+  const base64Data = parts[1]; // The actual base64 content
   
-  // Convert Blob to File
+  // 2. Extract MIME type from header using regex
+  const mimeMatch = header.match(/:(.*?);/);
+  const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+  
+  // 3. Decode base64 to binary string using atob()
+  const binaryString = atob(base64Data);
+  
+  // 4. Convert binary string to Uint8Array
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  
+  // 5. Create Blob from Uint8Array
+  const blob = new Blob([bytes], { type: mimeType });
+  
+  // 6. Convert Blob to File
   return new File([blob], 'image.jpg', { type: mimeType });
 }
 

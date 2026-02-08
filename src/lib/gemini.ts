@@ -15,10 +15,10 @@ import { AnalysisResult, InsightCategory, TierType } from './types';
  */
 const DIMENSION_NAMES: Record<InsightCategory, string> = {
   health: 'Health',
+  preservatives: 'Processing and Preservatives',
+  allergies: 'Allergens',
   sustainability: 'Responsibly Produced',
-  carbon: 'Carbon Impact',
-  preservatives: 'Preservatives',
-  allergies: 'Allergies',
+  carbon: 'Environmental Impact',
 };
 
 /**
@@ -73,7 +73,7 @@ RULES:
 - Analyze ONLY the ${dimensionName} dimension
 - If no products detected, return empty array: []
 - If product details unclear, use "Unknown" rating
-- Keep explanations brief (1 sentence, max 15 words)
+- Keep explanations concise (up to 3 lines of text)
 - Do NOT use any external tools or search capabilities`;
   }
 
@@ -84,23 +84,48 @@ TASK:
 - Identify ALL visible grocery products in the image
 - For each product, analyze these 5 dimensions:
   1. Health: Nutritional quality (Good/Fair/Poor)
-  2. Responsibly Produced: Sustainability practices (Yes/Partial/No/Unknown)
-  3. Carbon Impact: Environmental footprint (Low/Medium/High/Unknown)
-  4. Preservatives: Presence of artificial preservatives (None/Some/Many/Unknown)
-  5. Allergies: Common allergens present (list or "None detected")
+  2. Processing and Preservatives: Level of processing and artificial preservatives (None/Some/Many/Unknown)
+  3. Allergens: Common allergens present (list or "None detected")
+  4. Responsibly Produced: Sustainability practices (Yes/Partial/No/Unknown)
+  5. Environmental Impact: Carbon footprint and environmental impact (Low/Medium/High/Unknown)
 
-RESEARCH CAPABILITIES:
-- You have access to web search (tavilySearch) and content extraction (scrape_url) tools
-- If product information from the image is insufficient, USE TOOLS to find authoritative data
-- Search for: manufacturer websites, sustainability reports, nutrition databases
-- Extract clean content from relevant URLs for deep analysis
-- Synthesize image data + web research into comprehensive insights
+CRITICAL RESEARCH REQUIREMENTS:
+- You MUST use tavilySearch BEFORE generating your response
+- Make ONE comprehensive search that covers ALL dimensions: sustainability, carbon, certifications, sourcing
+- Search query should be: "[Parent Company] [Brand] sustainability carbon footprint environmental report 2024"
+- DO NOT say "Need to research" - you have the search tool, USE IT FIRST
+- DO NOT return "Unknown" for sustainability/carbon without searching
+- After searching, synthesize the results into your insights
 
-TOOL USAGE GUIDELINES:
-- Use tavilySearch when you need to find product information, company reports, or sustainability data
-- Use scrape_url to extract detailed content from specific URLs
-- Combine multiple sources for accurate analysis
-- If tools fail, provide best analysis based on image alone
+SEARCH STRATEGY (ONE SEARCH FOR ALL INFO):
+- Combine multiple topics in one query for efficiency
+- Example: "Mondelez belVita sustainability carbon footprint environmental impact 2024"
+- This finds: sustainability reports, carbon data, environmental certifications, sourcing practices
+- Extract relevant information from search results for ALL five dimensions
+
+TOOL USAGE WORKFLOW:
+1. Analyze visible product information from image
+2. Identify information gaps (especially sustainability, carbon, certifications)
+3. Use tavilySearch with SPECIFIC queries. Examples:
+   - For belVita products: "Mondelez sustainability report belVita"
+   - For Coca-Cola: "Coca-Cola carbon footprint environmental report"
+   - For organic products: "[Brand] organic certification USDA"
+   - For allergens: "[Product name] allergen information ingredients"
+4. Analyze search results and extract relevant information
+5. Synthesize image data + web research into comprehensive insights
+
+SEARCH QUERY BEST PRACTICES:
+- Include brand/manufacturer name (e.g., "Mondelez" for belVita, "Unilever" for Dove)
+- Add specific terms: "sustainability report", "carbon footprint", "environmental impact"
+- Include year for recent data: "2024 sustainability report"
+- Search for certifications: "Fair Trade certified", "B Corp", "Rainforest Alliance"
+
+WHEN TO USE TOOLS:
+- Sustainability practices not visible → Search for company sustainability reports
+- Carbon impact unclear → Search for carbon footprint data or company environmental reports
+- Certifications not visible → Search for product certifications (organic, fair trade, etc.)
+- Nutritional details unclear → Search nutrition databases
+- Allergen information incomplete → Search product specifications
 
 OUTPUT FORMAT (STRICT JSON ONLY):
 You MUST respond with ONLY a JSON array. Do not include any explanatory text.
@@ -110,10 +135,10 @@ Return exactly this structure:
     "productName": "Product Name",
     "insights": {
       "health": { "rating": "Good", "explanation": "Brief reason" },
-      "sustainability": { "rating": "Yes", "explanation": "Brief reason" },
-      "carbon": { "rating": "Low", "explanation": "Brief reason" },
       "preservatives": { "rating": "None", "explanation": "Brief reason" },
-      "allergies": { "rating": "None detected", "explanation": "Brief reason" }
+      "allergies": { "rating": "None detected", "explanation": "Brief reason" },
+      "sustainability": { "rating": "Yes", "explanation": "Brief reason" },
+      "carbon": { "rating": "Low", "explanation": "Brief reason" }
     }
   }
 ]
@@ -123,8 +148,8 @@ RULES:
 - Analyze ALL visible products (batch scanning enabled)
 - Analyze ALL 5 dimensions for each product
 - If no products detected, return empty array: []
-- If product details unclear, use tools to research OR use "Unknown" ratings
-- Keep explanations brief (1 sentence, max 15 words)
+- ALWAYS attempt web search before returning "Unknown" for sustainability/carbon/responsible production
+- Keep explanations concise (up to 3 lines of text)
 - Handle multiple products in one image`;
 }
 
@@ -134,10 +159,10 @@ RULES:
 function getDimensionDescription(dimension: InsightCategory): string {
   const descriptions: Record<InsightCategory, string> = {
     health: 'Nutritional quality and health impact (Good/Fair/Poor)',
-    sustainability: 'Responsible production practices (Yes/Partial/No/Unknown)',
-    carbon: 'Environmental footprint (Low/Medium/High/Unknown)',
-    preservatives: 'Artificial preservatives present (None/Some/Many/Unknown)',
+    preservatives: 'Level of processing and artificial preservatives (None/Some/Many/Unknown)',
     allergies: 'Common allergens present (list or "None detected")',
+    sustainability: 'Responsible production practices (Yes/Partial/No/Unknown)',
+    carbon: 'Carbon footprint and environmental impact (Low/Medium/High/Unknown)',
   };
   return descriptions[dimension];
 }
@@ -191,7 +216,7 @@ export function parseGeminiResponse(
   const requiredCategories: InsightCategory[] =
     tier === 'free' && dimension
       ? [dimension] // Free tier: Only the selected dimension
-      : ['health', 'sustainability', 'carbon', 'preservatives', 'allergies']; // Premium: All five
+      : ['health', 'preservatives', 'allergies', 'sustainability', 'carbon']; // Premium: All five
 
   // Step 5: Validate each product in the array
   for (let i = 0; i < parsed.length; i++) {

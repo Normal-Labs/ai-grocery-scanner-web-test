@@ -33,28 +33,28 @@ const DIMENSIONS: Array<{
     description: 'Nutritional quality and health impact',
   },
   {
+    value: 'preservatives',
+    label: 'Processing and Preservatives',
+    icon: '🧪',
+    description: 'Level of processing and artificial preservatives',
+  },
+  {
+    value: 'allergies',
+    label: 'Allergens',
+    icon: '⚠️',
+    description: 'Common allergens present',
+  },
+  {
     value: 'sustainability',
-    label: 'Sustainability',
+    label: 'Responsibly Produced',
     icon: '🌱',
     description: 'Responsible production practices',
   },
   {
     value: 'carbon',
-    label: 'Carbon Impact',
+    label: 'Environmental Impact',
     icon: '🌍',
-    description: 'Environmental footprint',
-  },
-  {
-    value: 'preservatives',
-    label: 'Preservatives',
-    icon: '🧪',
-    description: 'Artificial preservatives and additives',
-  },
-  {
-    value: 'allergies',
-    label: 'Allergies',
-    icon: '⚠️',
-    description: 'Common allergens present',
+    description: 'Carbon footprint and environmental impact',
   },
 ];
 

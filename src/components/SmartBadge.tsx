@@ -77,14 +77,14 @@ function getCategoryName(category: InsightCategory): string {
   switch (category) {
     case 'health':
       return 'Health';
+    case 'preservatives':
+      return 'Processing and Preservatives';
+    case 'allergies':
+      return 'Allergens';
     case 'sustainability':
       return 'Responsibly Produced';
     case 'carbon':
-      return 'Carbon Impact';
-    case 'preservatives':
-      return 'Preservatives';
-    case 'allergies':
-      return 'Allergies';
+      return 'Environmental Impact';
     default:
       return category;
   }

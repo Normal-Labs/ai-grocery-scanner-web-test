@@ -12,10 +12,10 @@
  */
 export type InsightCategory = 
   | 'health'
-  | 'sustainability'
-  | 'carbon'
   | 'preservatives'
-  | 'allergies';
+  | 'allergies'
+  | 'sustainability'
+  | 'carbon';
 
 /**
  * Individual insight with rating and explanation
@@ -31,10 +31,10 @@ export interface Insight {
  */
 export interface ProductInsights {
   health: Insight;
-  sustainability: Insight;
-  carbon: Insight;
   preservatives: Insight;
   allergies: Insight;
+  sustainability: Insight;
+  carbon: Insight;
 }
 
 /**

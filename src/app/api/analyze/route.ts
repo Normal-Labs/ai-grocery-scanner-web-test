@@ -177,6 +177,8 @@ export async function POST(request: NextRequest) {
       tier,
       dimension: dimension || 'all',
       toolsEnabled: Object.keys(tools).length > 0,
+      toolNames: Object.keys(tools),
+      hasTavilyKey: !!process.env.TAVILY_API_KEY,
       maxSteps
     });
 
@@ -189,7 +191,8 @@ export async function POST(request: NextRequest) {
 
     // Step 6: Call Gemini with Research Agent capabilities
     const result = await generateText({
-      model: google('gemini-2.0-flash-exp'),
+      model: google('gemini-2.0-flash'),
+      temperature: 0.2, // Lower temperature for more consistent responses
       messages: [
         {
           role: 'user',
@@ -203,7 +206,6 @@ export async function POST(request: NextRequest) {
         },
       ],
       tools,
-      maxRetries: tier === 'premium' ? 5 : 0, // Allow retries for tool-calling
       onStepFinish: (step) => {
         // Track progress for Premium tier
         if (tier === 'premium') {
@@ -211,12 +213,23 @@ export async function POST(request: NextRequest) {
           
           for (const toolCall of toolCalls) {
             if (toolCall.toolName === 'tavilySearch') {
+              // Log the search query for debugging
+              console.log('[Tool Call - Tavily Search]', {
+                toolName: toolCall.toolName,
+                timestamp: Date.now()
+              });
+              
               progressSteps.push({
                 type: 'search',
                 message: 'Searching for product data...',
                 timestamp: Date.now(),
               });
             } else if (toolCall.toolName === 'scrape_url') {
+              console.log('[Tool Call - Jina Reader]', {
+                toolName: toolCall.toolName,
+                timestamp: Date.now()
+              });
+              
               progressSteps.push({
                 type: 'scrape',
                 message: 'Reading manufacturer reports...',
@@ -245,6 +258,9 @@ export async function POST(request: NextRequest) {
       toolCallsUsed: progressSteps.length,
       responsePreview: responseText.substring(0, 200)
     });
+
+    // Log full response for debugging
+    console.log('[Gemini Full Response]', responseText);
 
     // Step 7: Parse and validate response
     const analysisResult = parseGeminiResponse(responseText, tier, dimension);
