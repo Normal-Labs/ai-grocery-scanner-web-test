@@ -34,25 +34,27 @@ TASK:
   4. Preservatives: Presence of artificial preservatives (None/Some/Many/Unknown)
   5. Allergies: Common allergens present (list or "None detected")
 
-OUTPUT FORMAT:
-Return a JSON array of products:
+OUTPUT FORMAT (STRICT JSON ONLY):
+You MUST respond with ONLY a JSON array. Do not include any explanatory text before or after the JSON.
+Return exactly this structure:
 [
   {
     "productName": "Product Name",
     "insights": {
-      "health": { "rating": "Good", "explanation": "..." },
-      "sustainability": { "rating": "Yes", "explanation": "..." },
-      "carbon": { "rating": "Low", "explanation": "..." },
-      "preservatives": { "rating": "None", "explanation": "..." },
-      "allergies": { "rating": "None detected", "explanation": "..." }
+      "health": { "rating": "Good", "explanation": "Brief reason" },
+      "sustainability": { "rating": "Yes", "explanation": "Brief reason" },
+      "carbon": { "rating": "Low", "explanation": "Brief reason" },
+      "preservatives": { "rating": "None", "explanation": "Brief reason" },
+      "allergies": { "rating": "None detected", "explanation": "Brief reason" }
     }
   }
 ]
 
 RULES:
-- If no products detected, return empty array []
+- Return ONLY valid JSON, no markdown, no explanations
+- If no products detected, return empty array: []
 - If product details unclear, use "Unknown" ratings
-- Provide brief, actionable explanations (1-2 sentences)
+- Keep explanations brief (1 sentence, max 15 words)
 - Handle multiple products in one image`;
 }
 

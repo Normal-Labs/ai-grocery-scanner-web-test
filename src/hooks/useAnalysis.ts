@@ -12,6 +12,7 @@
 
 import { useState, useCallback } from 'react';
 import type { AnalysisResult, AnalyzeResponse } from '@/lib/types';
+import { compressImage } from '@/lib/imageCompression';
 
 /**
  * Return type for useAnalysis hook
@@ -64,13 +65,27 @@ export function useAnalysis(): UseAnalysisReturn {
         throw new Error('Invalid image data provided');
       }
 
+      // Compress image before sending to API (reduces costs)
+      console.log('[Image Compression]', {
+        originalSize: Math.round(imageData.length / 1024),
+        unit: 'KB'
+      });
+      
+      const compressedImage = await compressImage(imageData);
+      
+      console.log('[Image Compression]', {
+        compressedSize: Math.round(compressedImage.length / 1024),
+        unit: 'KB',
+        reduction: Math.round((1 - compressedImage.length / imageData.length) * 100) + '%'
+      });
+
       // Make POST request to analysis API
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ imageData }),
+        body: JSON.stringify({ imageData: compressedImage }),
       });
 
       // Handle non-OK responses

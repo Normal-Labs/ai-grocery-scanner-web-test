@@ -181,8 +181,13 @@ export async function POST(request: NextRequest) {
     // Step 7: Initialize Google Generative AI with API key
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // Step 8: Get the Gemini model (using gemini-2.0-flash for vision support)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+    // Step 8: Get the Gemini model with JSON response mode
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-2.0-flash',
+      generationConfig: {
+        responseMimeType: 'application/json', // Force JSON output
+      }
+    });
 
     // Step 9: Convert base64 image to the format Gemini expects
     // Extract the base64 data without the data URI prefix
