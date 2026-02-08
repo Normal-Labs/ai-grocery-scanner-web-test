@@ -1,20 +1,23 @@
 /**
  * InsightsDisplay Component
  * 
- * Renders analysis results for all detected products.
- * Maps over products array and displays SmartBadge for each insight category.
+ * Renders analysis results for all detected products with tier-aware display.
+ * Premium tier: Shows all five insight categories
+ * Free tier: Shows only the selected dimension
  * 
- * Requirements: 4.3, 4.4, 4.5, 5.4
+ * Requirements: 4.3, 4.4, 4.5, 5.4, 11.2, 11.5
  */
 
-import { AnalysisResult } from '@/lib/types';
+import { AnalysisResult, InsightCategory } from '@/lib/types';
 import SmartBadge from './SmartBadge';
 
 interface InsightsDisplayProps {
   results: AnalysisResult;
+  tier?: 'free' | 'premium';
+  dimension?: InsightCategory;
 }
 
-export default function InsightsDisplay({ results }: InsightsDisplayProps) {
+export default function InsightsDisplay({ results, tier = 'premium', dimension }: InsightsDisplayProps) {
   // Handle empty results
   if (!results || !results.products || results.products.length === 0) {
     return (
@@ -28,6 +31,12 @@ export default function InsightsDisplay({ results }: InsightsDisplayProps) {
       </div>
     );
   }
+
+  // Determine which categories to display
+  const categoriesToDisplay: InsightCategory[] =
+    tier === 'free' && dimension
+      ? [dimension]
+      : ['health', 'sustainability', 'carbon', 'preservatives', 'allergies'];
 
   return (
     <div 
@@ -45,33 +54,33 @@ export default function InsightsDisplay({ results }: InsightsDisplayProps) {
             {product.productName}
           </h2>
 
-          {/* Render SmartBadge for each of the five insight categories */}
+          {/* Tier indicator */}
+          {tier === 'free' && (
+            <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+              <p className="text-sm text-blue-800">
+                🆓 Free tier: Showing {dimension} analysis only.{' '}
+                <span className="font-medium">Upgrade to Premium</span> for all 5 dimensions.
+              </p>
+            </div>
+          )}
+
+          {/* Render SmartBadge for each category */}
           <div className="space-y-3">
-            <SmartBadge
-              category="health"
-              rating={product.insights.health.rating}
-              explanation={product.insights.health.explanation}
-            />
-            <SmartBadge
-              category="sustainability"
-              rating={product.insights.sustainability.rating}
-              explanation={product.insights.sustainability.explanation}
-            />
-            <SmartBadge
-              category="carbon"
-              rating={product.insights.carbon.rating}
-              explanation={product.insights.carbon.explanation}
-            />
-            <SmartBadge
-              category="preservatives"
-              rating={product.insights.preservatives.rating}
-              explanation={product.insights.preservatives.explanation}
-            />
-            <SmartBadge
-              category="allergies"
-              rating={product.insights.allergies.rating}
-              explanation={product.insights.allergies.explanation}
-            />
+            {categoriesToDisplay.map((category) => {
+              const insight = product.insights[category];
+              
+              // Skip if insight doesn't exist (shouldn't happen with proper validation)
+              if (!insight) return null;
+              
+              return (
+                <SmartBadge
+                  key={category}
+                  category={category}
+                  rating={insight.rating}
+                  explanation={insight.explanation}
+                />
+              );
+            })}
           </div>
         </div>
       ))}

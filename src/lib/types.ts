@@ -86,3 +86,41 @@ export interface ScannerState {
   isAnalyzing: boolean;
   error: string | null;
 }
+
+/**
+ * Tier types for access control
+ */
+export type TierType = 'free' | 'premium';
+
+/**
+ * Progress step types for Research Agent
+ */
+export type ProgressStepType = 'search' | 'scrape' | 'synthesis' | 'complete';
+
+/**
+ * Progress step for live thought stream
+ */
+export interface ProgressStep {
+  type: ProgressStepType;
+  message: string;
+  timestamp: number;
+}
+
+/**
+ * Enhanced API request with tier support
+ */
+export interface EnhancedAnalyzeRequest {
+  imageData: string;
+  tier: TierType;
+  dimension?: InsightCategory; // Required for free tier
+}
+
+/**
+ * Enhanced API response with progress steps
+ */
+export interface EnhancedAnalyzeResponse {
+  success: boolean;
+  data?: AnalysisResult;
+  error?: string;
+  steps?: ProgressStep[];
+}

@@ -1,27 +1,30 @@
 /**
- * Main Page Component - AI Grocery Scanner
+ * Main Page Component - AI Grocery Scanner with Research Agent
  * 
- * Orchestrates the entire scanner workflow and manages application state.
- * Integrates CameraCapture, ImagePreview, ScanButton, and InsightsDisplay components.
- * Handles localStorage persistence for scan history.
+ * Orchestrates the entire scanner workflow with tier-based access control.
+ * Integrates TierContext, CameraCapture, ImagePreview, DimensionSelector,
+ * ProgressTracker, ScanButton, and InsightsDisplay components.
  * 
- * Requirements: 1.5, 2.1, 2.4, 2.5, 3.1, 3.8, 7.1, 7.5, 7.6, 7.7, 8.1, 8.4, 8.7
+ * Requirements: 1.5, 2.1, 2.4, 2.5, 3.1, 3.8, 7.1, 7.5, 7.6, 7.7, 8.1, 8.4, 8.7, 11.2, 11.5, 11.8, 12.1, 12.7
  */
 
 'use client';
 
 import { useState } from 'react';
+import { TierProvider, useTierContext } from '@/contexts/TierContext';
 import CameraCapture from '@/components/CameraCapture';
 import ImagePreview from '@/components/ImagePreview';
 import ScanButton from '@/components/ScanButton';
 import InsightsDisplay from '@/components/InsightsDisplay';
+import TierToggle from '@/components/TierToggle';
+import DimensionSelector from '@/components/DimensionSelector';
+import ProgressTracker from '@/components/ProgressTracker';
 import { useAnalysis } from '@/hooks/useAnalysis';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { AnalysisResult, SavedScan } from '@/lib/types';
 
 /**
  * Scanner state interface
- * Requirements: 1.5, 2.4, 2.5, 3.1, 8.1, 8.4
  */
 interface ScannerState {
   capturedImage: string | null;
@@ -30,7 +33,21 @@ interface ScannerState {
   error: string | null;
 }
 
-export default function Home() {
+/**
+ * Main scanner component (wrapped with TierProvider)
+ */
+function ScannerApp() {
+  // Access tier context
+  const {
+    tier,
+    setTier,
+    selectedDimension,
+    setSelectedDimension,
+    canUseBatchScanning,
+    canUseToolCalling,
+    canAnalyzeAllDimensions,
+  } = useTierContext();
+
   // Application state
   const [state, setState] = useState<ScannerState>({
     capturedImage: null,
@@ -44,12 +61,11 @@ export default function Home() {
   const [history, setHistory] = useState<SavedScan[]>([]);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
-  // Use analysis hook
-  const { analyzeImage, isLoading, error: analysisError } = useAnalysis();
+  // Use analysis hook with progress tracking
+  const { analyzeImage, isLoading, error: analysisError, progressSteps } = useAnalysis();
 
   /**
    * Handle image capture from camera
-   * Requirements: 1.5
    */
   const handleImageCapture = (imageData: string) => {
     setState({
@@ -61,11 +77,19 @@ export default function Home() {
   };
 
   /**
-   * Handle scan button click - trigger analysis
-   * Requirements: 3.1, 3.8
+   * Handle scan button click - trigger analysis with tier support
    */
   const handleScan = async () => {
     if (!state.capturedImage) return;
+
+    // Validate dimension selection for free tier
+    if (tier === 'free' && !selectedDimension) {
+      setState(prev => ({
+        ...prev,
+        error: 'Please select a dimension to analyze',
+      }));
+      return;
+    }
 
     setState(prev => ({
       ...prev,
@@ -75,7 +99,7 @@ export default function Home() {
     }));
 
     try {
-      const results = await analyzeImage(state.capturedImage);
+      const results = await analyzeImage(state.capturedImage, tier, selectedDimension || undefined);
       
       setState(prev => ({
         ...prev,
@@ -85,12 +109,9 @@ export default function Home() {
       }));
 
       // Save to localStorage after successful analysis
-      // Requirements: 7.1
       try {
         saveAnalysis(state.capturedImage, results);
       } catch (storageError) {
-        // Handle localStorage errors gracefully
-        // Requirements: 7.7
         console.warn('Failed to save to localStorage:', storageError);
         setStorageWarning('Unable to save scan history. Your browser storage may be full.');
       }
@@ -105,7 +126,6 @@ export default function Home() {
 
   /**
    * Handle retake button click - clear image and restart
-   * Requirements: 2.4, 2.5
    */
   const handleRetake = () => {
     setState({
@@ -117,8 +137,7 @@ export default function Home() {
   };
 
   /**
-   * Handle clear error button click - dismiss error messages
-   * Requirements: 8.4
+   * Handle clear error button click
    */
   const handleClearError = () => {
     setState(prev => ({
@@ -129,7 +148,6 @@ export default function Home() {
 
   /**
    * Handle view history button click
-   * Requirements: 7.5
    */
   const handleViewHistory = () => {
     try {
@@ -144,7 +162,6 @@ export default function Home() {
 
   /**
    * Handle clear history button click
-   * Requirements: 7.6
    */
   const handleClearHistory = () => {
     try {
@@ -177,6 +194,10 @@ export default function Home() {
     setShowHistory(false);
   };
 
+  // Check if scan button should be enabled
+  const canScan = state.capturedImage && !state.isAnalyzing && 
+    (tier === 'premium' || (tier === 'free' && selectedDimension));
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
       {/* Header */}
@@ -186,13 +207,20 @@ export default function Home() {
             🛒 AI Grocery Scanner
           </h1>
           <p className="text-sm text-gray-600 text-center mt-1">
-            Scan products for health, sustainability, and allergen insights
+            {canUseToolCalling 
+              ? 'Research Agent with web search & content extraction'
+              : 'Scan products for health, sustainability, and allergen insights'}
           </p>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="max-w-2xl mx-auto px-4 py-6 pb-24">
+        {/* Developer Sandbox - Tier Toggle */}
+        <div className="mb-6">
+          <TierToggle currentTier={tier} onTierChange={setTier} />
+        </div>
+
         {/* Storage Warning */}
         {storageWarning && (
           <div
@@ -329,7 +357,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* Image Preview - Show when image captured but no results yet */}
+            {/* Image Preview + Dimension Selector - Show when image captured but no results yet */}
             {state.capturedImage && !state.analysisResults && (
               <div className="space-y-4">
                 <ImagePreview
@@ -337,12 +365,28 @@ export default function Home() {
                   onRetake={handleRetake}
                 />
 
+                {/* Dimension Selector (Free Tier Only) */}
+                {tier === 'free' && (
+                  <DimensionSelector
+                    selectedDimension={selectedDimension}
+                    onDimensionChange={setSelectedDimension}
+                    disabled={state.isAnalyzing}
+                  />
+                )}
+
                 {/* Scan Button */}
                 <ScanButton
                   onScan={handleScan}
-                  disabled={!state.capturedImage || state.isAnalyzing}
+                  disabled={!canScan}
                   isLoading={state.isAnalyzing}
                 />
+              </div>
+            )}
+
+            {/* Progress Tracker (Premium Tier Only) */}
+            {state.isAnalyzing && tier === 'premium' && progressSteps.length > 0 && (
+              <div className="mb-6">
+                <ProgressTracker steps={progressSteps} isActive={state.isAnalyzing} />
               </div>
             )}
 
@@ -366,6 +410,11 @@ export default function Home() {
                       <p className="text-sm text-gray-600">
                         {state.analysisResults.products.length} product(s) detected
                       </p>
+                      {tier === 'premium' && progressSteps.length > 0 && (
+                        <p className="text-xs text-purple-600 mt-1">
+                          🔍 Research Agent used {progressSteps.length} step(s)
+                        </p>
+                      )}
                     </div>
                     <button
                       onClick={handleRetake}
@@ -376,8 +425,12 @@ export default function Home() {
                   </div>
                 </div>
 
-                {/* Display insights */}
-                <InsightsDisplay results={state.analysisResults} />
+                {/* Display insights with tier support */}
+                <InsightsDisplay 
+                  results={state.analysisResults}
+                  tier={tier}
+                  dimension={selectedDimension || undefined}
+                />
               </div>
             )}
           </>
@@ -409,5 +462,16 @@ export default function Home() {
         </footer>
       )}
     </div>
+  );
+}
+
+/**
+ * Main page export with TierProvider wrapper
+ */
+export default function Home() {
+  return (
+    <TierProvider>
+      <ScannerApp />
+    </TierProvider>
   );
 }

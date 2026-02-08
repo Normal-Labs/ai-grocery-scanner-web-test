@@ -1,26 +1,27 @@
 /**
  * useAnalysis Hook
  * 
- * Custom React hook for managing image analysis API calls.
+ * Custom React hook for managing image analysis API calls with tier support.
  * Handles POST requests to the /api/analyze endpoint, manages loading state,
- * handles network errors, and parses/validates JSON responses.
+ * tracks progress steps, handles network errors, and parses/validates JSON responses.
  * 
- * Requirements: 3.1, 3.8, 8.2
+ * Requirements: 3.1, 3.8, 8.2, 11.2, 11.4, 12.1
  */
 
 'use client';
 
 import { useState, useCallback } from 'react';
-import type { AnalysisResult, AnalyzeResponse } from '@/lib/types';
+import type { AnalysisResult, EnhancedAnalyzeResponse, TierType, InsightCategory, ProgressStep } from '@/lib/types';
 import { compressImage } from '@/lib/imageCompression';
 
 /**
  * Return type for useAnalysis hook
  */
 export interface UseAnalysisReturn {
-  analyzeImage: (imageData: string) => Promise<AnalysisResult>;
+  analyzeImage: (imageData: string, tier: TierType, dimension?: InsightCategory) => Promise<AnalysisResult>;
   isLoading: boolean;
   error: string | null;
+  progressSteps: ProgressStep[];
 }
 
 /**
@@ -44,25 +45,38 @@ export interface UseAnalysisReturn {
 export function useAnalysis(): UseAnalysisReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
 
   /**
-   * Analyze an image by sending it to the API endpoint
+   * Analyze an image by sending it to the API endpoint with tier support
    * 
-   * Requirements: 3.1, 3.8, 8.2
+   * Requirements: 3.1, 3.8, 8.2, 11.2, 11.4, 12.1
    * 
    * @param {string} imageData - Base64-encoded image data with data URI prefix
+   * @param {TierType} tier - User's access tier (free or premium)
+   * @param {InsightCategory} dimension - Dimension to analyze (required for free tier)
    * @returns {Promise<AnalysisResult>} Analysis results containing detected products and insights
    * @throws {Error} If the API call fails or returns an invalid response
    */
-  const analyzeImage = useCallback(async (imageData: string): Promise<AnalysisResult> => {
-    // Reset error state
+  const analyzeImage = useCallback(async (
+    imageData: string,
+    tier: TierType,
+    dimension?: InsightCategory
+  ): Promise<AnalysisResult> => {
+    // Reset error state and progress
     setError(null);
     setIsLoading(true);
+    setProgressSteps([]);
 
     try {
       // Validate input
       if (!imageData || typeof imageData !== 'string') {
         throw new Error('Invalid image data provided');
+      }
+
+      // Validate tier-specific requirements
+      if (tier === 'free' && !dimension) {
+        throw new Error('Dimension is required for free tier');
       }
 
       // Compress image before sending to API (reduces costs)
@@ -79,13 +93,17 @@ export function useAnalysis(): UseAnalysisReturn {
         reduction: Math.round((1 - compressedImage.length / imageData.length) * 100) + '%'
       });
 
-      // Make POST request to analysis API
+      // Make POST request to analysis API with tier and dimension
       const response = await fetch('/api/analyze', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ imageData: compressedImage }),
+        body: JSON.stringify({ 
+          imageData: compressedImage,
+          tier,
+          dimension
+        }),
       });
 
       // Handle non-OK responses
@@ -118,7 +136,7 @@ export function useAnalysis(): UseAnalysisReturn {
       }
 
       // Parse JSON response
-      let responseData: AnalyzeResponse;
+      let responseData: EnhancedAnalyzeResponse;
       try {
         responseData = await response.json();
       } catch (parseError) {
@@ -146,6 +164,11 @@ export function useAnalysis(): UseAnalysisReturn {
         const errorMessage = 'No analysis data returned from server.';
         setError(errorMessage);
         throw new Error(errorMessage);
+      }
+
+      // Update progress steps if available (Premium tier)
+      if (responseData.steps && responseData.steps.length > 0) {
+        setProgressSteps(responseData.steps);
       }
 
       // Validate AnalysisResult structure
@@ -230,5 +253,6 @@ export function useAnalysis(): UseAnalysisReturn {
     analyzeImage,
     isLoading,
     error,
+    progressSteps,
   };
 }

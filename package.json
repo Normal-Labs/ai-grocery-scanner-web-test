@@ -14,12 +14,14 @@
   "dependencies": {
     "@ai-sdk/google": "^3.0.22",
     "@google/generative-ai": "^0.24.1",
+    "@tavily/ai-sdk": "^0.4.1",
     "ai": "^6.0.77",
     "browser-image-compression": "^2.0.2",
     "fast-check": "^4.5.3",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
