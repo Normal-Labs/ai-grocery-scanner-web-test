@@ -29,11 +29,11 @@ const COMPRESSION_OPTIONS = {
  */
 export async function compressImage(base64Image: string): Promise<string> {
   try {
-    // Convert base64 to Blob
-    const blob = await base64ToBlob(base64Image);
+    // Convert base64 to File (required by browser-image-compression)
+    const file = await base64ToFile(base64Image);
     
     // Compress the image
-    const compressedBlob = await imageCompression(blob, COMPRESSION_OPTIONS);
+    const compressedBlob = await imageCompression(file, COMPRESSION_OPTIONS);
     
     // Convert back to base64
     const compressedBase64 = await blobToBase64(compressedBlob);
@@ -47,11 +47,17 @@ export async function compressImage(base64Image: string): Promise<string> {
 }
 
 /**
- * Convert base64 string to Blob
+ * Convert base64 string to File object
  */
-async function base64ToBlob(base64: string): Promise<Blob> {
+async function base64ToFile(base64: string): Promise<File> {
   const response = await fetch(base64);
-  return response.blob();
+  const blob = await response.blob();
+  
+  // Extract mime type from base64 string
+  const mimeType = base64.split(';')[0].split(':')[1] || 'image/jpeg';
+  
+  // Convert Blob to File
+  return new File([blob], 'image.jpg', { type: mimeType });
 }
 
 /**
