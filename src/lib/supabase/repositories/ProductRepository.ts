@@ -150,7 +150,7 @@ export class ProductRepository {
       // If barcode exists, this will update the existing record
       const { data: product, error } = await supabase
         .from('products')
-        .upsert(insertData, {
+        .upsert(insertData as any, {
           onConflict: 'barcode',
           ignoreDuplicates: false,
         })
@@ -217,7 +217,7 @@ export class ProductRepository {
     try {
       const supabase = getSupabaseClient();
       
-      const { error } = await supabase
+      const { error } = await (supabase as any)
         .from('products')
         .update({
           last_scanned_at: new Date().toISOString(),
