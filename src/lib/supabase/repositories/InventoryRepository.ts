@@ -119,7 +119,7 @@ export class InventoryRepository {
       // If the combination exists, update last_seen_at; otherwise, insert new record
       const { data: inventory, error } = await supabase
         .from('store_inventory')
-        .upsert(insertData, {
+        .upsert(insertData as any, {
           onConflict: 'product_id,store_id',
           ignoreDuplicates: false,
         })
