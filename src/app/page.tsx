@@ -19,8 +19,12 @@ import InsightsDisplay from '@/components/InsightsDisplay';
 import TierToggle from '@/components/TierToggle';
 import DimensionSelector from '@/components/DimensionSelector';
 import ProgressTracker from '@/components/ProgressTracker';
+import AuthGuard from '@/components/AuthGuard';
+import BarcodeInput, { isValidBarcode } from '@/components/BarcodeInput';
 import { useAnalysis } from '@/hooks/useAnalysis';
+import { useScan } from '@/hooks/useScan';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
+import { getCurrentPosition } from '@/lib/geolocation';
 import type { AnalysisResult, SavedScan } from '@/lib/types';
 
 /**
@@ -31,6 +35,7 @@ interface ScannerState {
   analysisResults: AnalysisResult | null;
   isAnalyzing: boolean;
   error: string | null;
+  barcode: string;
 }
 
 /**
@@ -43,9 +48,7 @@ function ScannerApp() {
     setTier,
     selectedDimension,
     setSelectedDimension,
-    canUseBatchScanning,
     canUseToolCalling,
-    canAnalyzeAllDimensions,
   } = useTierContext();
 
   // Application state
@@ -54,6 +57,7 @@ function ScannerApp() {
     analysisResults: null,
     isAnalyzing: false,
     error: null,
+    barcode: '',
   });
 
   // History view state
@@ -61,26 +65,61 @@ function ScannerApp() {
   const [history, setHistory] = useState<SavedScan[]>([]);
   const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
-  // Use analysis hook with progress tracking
-  const { analyzeImage, isLoading, error: analysisError, progressSteps } = useAnalysis();
+  // Use new scan hook with cache-first architecture
+  const { scanProduct, error: scanError, fromCache } = useScan();
+  
+  // Keep old analysis hook for fallback (will be removed in future)
+  const { progressSteps } = useAnalysis();
 
   /**
    * Handle image capture from camera
    */
   const handleImageCapture = (imageData: string) => {
-    setState({
+    setState(prev => ({
+      ...prev,
       capturedImage: imageData,
       analysisResults: null,
       isAnalyzing: false,
       error: null,
-    });
+    }));
   };
 
   /**
-   * Handle scan button click - trigger analysis with tier support
+   * Handle barcode input change
+   */
+  const handleBarcodeChange = (barcode: string) => {
+    setState(prev => ({
+      ...prev,
+      barcode,
+      error: null,
+    }));
+  };
+
+  /**
+   * Handle scan button click - trigger scan with new cache-first API
+   * 
+   * Requirements: 2.1, 2.2 - Use actual barcode from user input
+   * Requirements: 9.1, 9.2, 9.3 - Capture geolocation when scan is initiated
    */
   const handleScan = async () => {
     if (!state.capturedImage) return;
+
+    // Validate barcode
+    if (!state.barcode) {
+      setState(prev => ({
+        ...prev,
+        error: 'Please enter a product barcode',
+      }));
+      return;
+    }
+
+    if (!isValidBarcode(state.barcode)) {
+      setState(prev => ({
+        ...prev,
+        error: 'Please enter a valid barcode (8-13 digits)',
+      }));
+      return;
+    }
 
     // Validate dimension selection for free tier
     if (tier === 'free' && !selectedDimension) {
@@ -99,7 +138,31 @@ function ScannerApp() {
     }));
 
     try {
-      const results = await analyzeImage(state.capturedImage, tier, selectedDimension || undefined);
+      // Requirement 9.1: Request geolocation when scan is initiated
+      // Requirement 9.2: Capture coordinates if permission granted
+      // Requirement 9.3: Continue scan if permission denied
+      console.log('[Geolocation] Requesting user location...');
+      const locationResult = await getCurrentPosition();
+      
+      let location: { latitude: number; longitude: number } | undefined;
+      
+      if (locationResult.coordinates) {
+        location = locationResult.coordinates;
+        console.log('[Geolocation] Location captured:', location);
+      } else {
+        // Permission denied or unavailable - continue without location
+        console.log('[Geolocation] Location unavailable:', locationResult.error?.message);
+        location = undefined;
+      }
+
+      // Call new scan API with cache-first architecture
+      const results = await scanProduct({
+        imageData: state.capturedImage,
+        barcode: state.barcode,
+        tier,
+        dimension: selectedDimension || undefined,
+        location,
+      });
       
       setState(prev => ({
         ...prev,
@@ -108,7 +171,7 @@ function ScannerApp() {
         error: null,
       }));
 
-      // Save to localStorage after successful analysis
+      // Save to localStorage after successful scan
       try {
         saveAnalysis(state.capturedImage, results);
       } catch (storageError) {
@@ -119,7 +182,7 @@ function ScannerApp() {
       setState(prev => ({
         ...prev,
         isAnalyzing: false,
-        error: analysisError || 'Failed to analyze image. Please try again.',
+        error: scanError || 'Failed to scan product. Please try again.',
       }));
     }
   };
@@ -133,6 +196,7 @@ function ScannerApp() {
       analysisResults: null,
       isAnalyzing: false,
       error: null,
+      barcode: '',
     });
   };
 
@@ -190,12 +254,14 @@ function ScannerApp() {
       analysisResults: scan.results,
       isAnalyzing: false,
       error: null,
+      barcode: '', // Don't restore barcode from history
     });
     setShowHistory(false);
   };
 
   // Check if scan button should be enabled
   const canScan = state.capturedImage && !state.isAnalyzing && 
+    isValidBarcode(state.barcode) &&
     (tier === 'premium' || (tier === 'free' && selectedDimension));
 
   return (
@@ -214,8 +280,9 @@ function ScannerApp() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-2xl mx-auto px-4 py-6 pb-24">
+      {/* Main Content - Protected by AuthGuard */}
+      <AuthGuard>
+        <main className="max-w-2xl mx-auto px-4 py-6 pb-24">
         {/* Developer Sandbox - Tier Toggle */}
         <div className="mb-6">
           <TierToggle currentTier={tier} onTierChange={setTier} />
@@ -365,6 +432,16 @@ function ScannerApp() {
                   onRetake={handleRetake}
                 />
 
+                {/* Barcode Input */}
+                <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
+                  <BarcodeInput
+                    value={state.barcode}
+                    onChange={handleBarcodeChange}
+                    disabled={state.isAnalyzing}
+                    showValidation={true}
+                  />
+                </div>
+
                 {/* Dimension Selector (Free Tier Only) */}
                 {tier === 'free' && (
                   <DimensionSelector
@@ -410,6 +487,22 @@ function ScannerApp() {
                       <p className="text-sm text-gray-600">
                         {state.analysisResults.products.length} product(s) detected
                       </p>
+                      {/* Cache indicator */}
+                      {fromCache !== null && (
+                        <p className="text-xs text-blue-600 mt-1 flex items-center gap-1">
+                          {fromCache ? (
+                            <>
+                              <span role="img" aria-label="cached">⚡</span>
+                              Loaded from cache (instant)
+                            </>
+                          ) : (
+                            <>
+                              <span role="img" aria-label="fresh">🔍</span>
+                              Fresh analysis completed
+                            </>
+                          )}
+                        </p>
+                      )}
                       {tier === 'premium' && progressSteps.length > 0 && (
                         <p className="text-xs text-purple-600 mt-1">
                           🔍 Research Agent used {progressSteps.length} step(s)
@@ -436,6 +529,7 @@ function ScannerApp() {
           </>
         )}
       </main>
+      </AuthGuard>
 
       {/* Footer with History Controls */}
       {!showHistory && (

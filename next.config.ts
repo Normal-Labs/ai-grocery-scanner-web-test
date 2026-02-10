@@ -21,7 +21,7 @@ const nextConfig: NextConfig = {
               "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
               "style-src 'self' 'unsafe-inline'",
               "img-src 'self' data: blob:",
-              "connect-src 'self' https://generativelanguage.googleapis.com",
+              "connect-src 'self' https://generativelanguage.googleapis.com https://cthkmoggglzdvevbfjbe.supabase.co",
               "media-src 'self' blob:",
               "font-src 'self'",
               "object-src 'none'",
