@@ -191,25 +191,27 @@ export async function POST(request: NextRequest) {
     // Step 3: Parse and validate request body
     const body = await request.json();
 
-    // Validate barcode
-    if (!body.barcode || typeof body.barcode !== 'string') {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Missing or invalid barcode field in request body'
-        } as ScanResponse,
-        { status: 400 }
-      );
-    }
+    // Validate barcode (optional)
+    if (body.barcode) {
+      if (typeof body.barcode !== 'string') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Invalid barcode field in request body'
+          } as ScanResponse,
+          { status: 400 }
+        );
+      }
 
-    if (!BARCODE_REGEX.test(body.barcode)) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Invalid barcode format. Expected 8-13 digits.'
-        } as ScanResponse,
-        { status: 400 }
-      );
+      if (!BARCODE_REGEX.test(body.barcode)) {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Invalid barcode format. Expected 8-13 digits.'
+          } as ScanResponse,
+          { status: 400 }
+        );
+      }
     }
 
     // Validate imageData
@@ -301,7 +303,7 @@ export async function POST(request: NextRequest) {
 
     // Step 4: Construct scan request
     const scanRequest: ScanRequest = {
-      barcode: body.barcode,
+      barcode: body.barcode || undefined,
       imageData: body.imageData,
       userId,
       location,
@@ -322,7 +324,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[Scan API] Processing scan request:', {
       timestamp: new Date().toISOString(),
-      barcode: scanRequest.barcode,
+      barcode: scanRequest.barcode || 'none',
       userId,
       hasLocation: !!location,
       tier,
@@ -337,7 +339,7 @@ export async function POST(request: NextRequest) {
     
     console.log('[Scan API] Scan completed successfully:', {
       timestamp: new Date().toISOString(),
-      barcode: scanRequest.barcode,
+      barcode: scanRequest.barcode || 'none',
       userId,
       fromCache: result.fromCache,
       hasStore: !!result.storeId,

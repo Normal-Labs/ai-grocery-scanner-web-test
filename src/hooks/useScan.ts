@@ -23,7 +23,7 @@ import { compressImage } from '@/lib/imageCompression';
  */
 export interface ScanParams {
   imageData: string;
-  barcode: string;
+  barcode?: string;
   tier: TierType;
   dimension?: InsightCategory;
   location?: {
@@ -103,7 +103,7 @@ export function useScan(): UseScanReturn {
         throw new Error('Invalid image data provided');
       }
 
-      if (!params.barcode || typeof params.barcode !== 'string') {
+      if (params.barcode && typeof params.barcode !== 'string') {
         throw new Error('Invalid barcode provided');
       }
 

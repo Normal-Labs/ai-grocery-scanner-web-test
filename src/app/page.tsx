@@ -20,7 +20,6 @@ import TierToggle from '@/components/TierToggle';
 import DimensionSelector from '@/components/DimensionSelector';
 import ProgressTracker from '@/components/ProgressTracker';
 import AuthGuard from '@/components/AuthGuard';
-import BarcodeInput, { isValidBarcode } from '@/components/BarcodeInput';
 import { useAnalysis } from '@/hooks/useAnalysis';
 import { useScan } from '@/hooks/useScan';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
@@ -35,7 +34,6 @@ interface ScannerState {
   analysisResults: AnalysisResult | null;
   isAnalyzing: boolean;
   error: string | null;
-  barcode: string;
 }
 
 /**
@@ -57,7 +55,6 @@ function ScannerApp() {
     analysisResults: null,
     isAnalyzing: false,
     error: null,
-    barcode: '',
   });
 
   // History view state
@@ -85,41 +82,12 @@ function ScannerApp() {
   };
 
   /**
-   * Handle barcode input change
-   */
-  const handleBarcodeChange = (barcode: string) => {
-    setState(prev => ({
-      ...prev,
-      barcode,
-      error: null,
-    }));
-  };
-
-  /**
    * Handle scan button click - trigger scan with new cache-first API
    * 
-   * Requirements: 2.1, 2.2 - Use actual barcode from user input
    * Requirements: 9.1, 9.2, 9.3 - Capture geolocation when scan is initiated
    */
   const handleScan = async () => {
     if (!state.capturedImage) return;
-
-    // Validate barcode
-    if (!state.barcode) {
-      setState(prev => ({
-        ...prev,
-        error: 'Please enter a product barcode',
-      }));
-      return;
-    }
-
-    if (!isValidBarcode(state.barcode)) {
-      setState(prev => ({
-        ...prev,
-        error: 'Please enter a valid barcode (8-13 digits)',
-      }));
-      return;
-    }
 
     // Validate dimension selection for free tier
     if (tier === 'free' && !selectedDimension) {
@@ -158,7 +126,6 @@ function ScannerApp() {
       // Call new scan API with cache-first architecture
       const results = await scanProduct({
         imageData: state.capturedImage,
-        barcode: state.barcode,
         tier,
         dimension: selectedDimension || undefined,
         location,
@@ -196,7 +163,6 @@ function ScannerApp() {
       analysisResults: null,
       isAnalyzing: false,
       error: null,
-      barcode: '',
     });
   };
 
@@ -254,14 +220,12 @@ function ScannerApp() {
       analysisResults: scan.results,
       isAnalyzing: false,
       error: null,
-      barcode: '', // Don't restore barcode from history
     });
     setShowHistory(false);
   };
 
   // Check if scan button should be enabled
   const canScan = state.capturedImage && !state.isAnalyzing && 
-    isValidBarcode(state.barcode) &&
     (tier === 'premium' || (tier === 'free' && selectedDimension));
 
   return (
@@ -431,16 +395,6 @@ function ScannerApp() {
                   imageData={state.capturedImage}
                   onRetake={handleRetake}
                 />
-
-                {/* Barcode Input */}
-                <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
-                  <BarcodeInput
-                    value={state.barcode}
-                    onChange={handleBarcodeChange}
-                    disabled={state.isAnalyzing}
-                    showValidation={true}
-                  />
-                </div>
 
                 {/* Dimension Selector (Free Tier Only) */}
                 {tier === 'free' && (

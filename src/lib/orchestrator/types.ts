@@ -22,8 +22,8 @@ import { Product } from '@/lib/supabase/types';
  * Requirement 5.1: Cache-first architecture with barcode lookup
  */
 export interface ScanRequest {
-  /** Product barcode for cache lookup and product registry */
-  barcode: string;
+  /** Product barcode for cache lookup and product registry (optional) */
+  barcode?: string;
   
   /** Base64-encoded image data with data URI prefix */
   imageData: string;
@@ -138,7 +138,7 @@ export function isScanRequest(value: unknown): value is ScanRequest {
   
   // Check required fields
   if (
-    typeof obj.barcode !== 'string' ||
+    (obj.barcode !== undefined && typeof obj.barcode !== 'string') ||
     typeof obj.imageData !== 'string' ||
     typeof obj.userId !== 'string' ||
     (obj.tier !== 'free' && obj.tier !== 'premium')

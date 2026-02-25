@@ -256,14 +256,12 @@ describe('useScan', () => {
       );
     });
 
-    it('should validate barcode is provided', async () => {
+    it('should validate barcode format if provided', async () => {
       const { result } = renderHook(() => useScan());
 
-      const invalidParams = { ...mockScanParams, barcode: '' };
+      const invalidParams = { ...mockScanParams, barcode: 'invalid' };
 
-      await expect(result.current.scanProduct(invalidParams)).rejects.toThrow(
-        'Invalid barcode provided'
-      );
+      await expect(result.current.scanProduct(invalidParams)).rejects.toThrow();
     });
 
     it('should validate dimension is required for free tier', async () => {

@@ -93,7 +93,7 @@ export class ScanOrchestrator {
     const startTime = Date.now();
     
     console.log('[ScanOrchestrator] Processing scan:', {
-      barcode: request.barcode,
+      barcode: request.barcode || 'none',
       userId: request.userId,
       hasLocation: !!request.location,
       tier: request.tier,
@@ -102,30 +102,34 @@ export class ScanOrchestrator {
     });
 
     try {
-      // Step 1: Check MongoDB cache for existing insight
+      // Step 1: Check MongoDB cache for existing insight (only if barcode provided)
       // Requirement 5.1: Query MongoDB AI_Cache for existing insights
       let cachedInsight: CachedInsight | null = null;
       
-      try {
-        cachedInsight = await withRetry(
-          async () => await this.cacheRepo.get(request.barcode),
-          3,
-          1000
-        );
-      } catch (error) {
-        // Log cache error but continue with cache miss flow
-        // Requirement 10.5: Log all database errors with context
-        console.error('[ScanOrchestrator] MongoDB cache error (continuing as cache miss):', {
-          barcode: request.barcode,
-          error: error instanceof Error ? error.message : String(error),
-          timestamp: new Date().toISOString(),
-        });
+      if (request.barcode) {
+        try {
+          cachedInsight = await withRetry(
+            async () => await this.cacheRepo.get(request.barcode!),
+            3,
+            1000
+          );
+        } catch (error) {
+          // Log cache error but continue with cache miss flow
+          // Requirement 10.5: Log all database errors with context
+          console.error('[ScanOrchestrator] MongoDB cache error (continuing as cache miss):', {
+            barcode: request.barcode,
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } else {
+        console.log('[ScanOrchestrator] No barcode provided, skipping cache lookup');
       }
 
       // Step 2: Handle cache hit or cache miss
       let result: ScanResult;
       
-      if (cachedInsight) {
+      if (cachedInsight && request.barcode) {
         console.log('[ScanOrchestrator] Cache hit:', {
           barcode: request.barcode,
           productName: cachedInsight.productName,
@@ -137,7 +141,7 @@ export class ScanOrchestrator {
         result = await this.handleCacheHit(request.barcode, cachedInsight, request);
       } else {
         console.log('[ScanOrchestrator] Cache miss:', {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
         });
         
         // Requirement 5.4, 5.5, 5.6: Handle cache miss
@@ -157,7 +161,7 @@ export class ScanOrchestrator {
           // Log location processing error but don't fail the scan
           // Requirement 10.5: Log all database errors with context
           console.error('[ScanOrchestrator] Location processing error (continuing without location):', {
-            barcode: request.barcode,
+            barcode: request.barcode || 'none',
             productId: result.product.id,
             location: request.location,
             error: error instanceof Error ? error.message : String(error),
@@ -168,7 +172,7 @@ export class ScanOrchestrator {
 
       const duration = Date.now() - startTime;
       console.log('[ScanOrchestrator] Scan complete:', {
-        barcode: request.barcode,
+        barcode: request.barcode || 'none',
         fromCache: result.fromCache,
         hasStore: !!result.storeId,
         duration,
@@ -179,7 +183,7 @@ export class ScanOrchestrator {
     } catch (error) {
       // Requirement 10.5: Log all errors with context
       console.error('[ScanOrchestrator] Scan failed:', {
-        barcode: request.barcode,
+        barcode: request.barcode || 'none',
         userId: request.userId,
         error: error instanceof Error ? error.message : String(error),
         stack: error instanceof Error ? error.stack : undefined,
@@ -197,7 +201,7 @@ export class ScanOrchestrator {
         'mongodb', // Default to mongodb as source
         false,
         {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
           userId: request.userId,
           originalError: error instanceof Error ? error.message : String(error),
         }
@@ -358,7 +362,7 @@ export class ScanOrchestrator {
    */
   private async handleCacheMiss(request: ScanRequest): Promise<ScanResult> {
     console.log('[ScanOrchestrator] Handling cache miss:', {
-      barcode: request.barcode,
+      barcode: request.barcode || 'none',
       tier: request.tier,
       dimension: request.dimension,
     });
@@ -397,14 +401,14 @@ export class ScanOrchestrator {
       analysisResult = analyzeData.data;
       
       console.log('[ScanOrchestrator] Research Agent completed:', {
-        barcode: request.barcode,
+        barcode: request.barcode || 'none',
         productCount: analysisResult.products.length,
         productName: analysisResult.products[0]?.productName,
       });
     } catch (error) {
       // Requirement 10.5: Log all errors with context
       console.error('[ScanOrchestrator] Research Agent failed:', {
-        barcode: request.barcode,
+        barcode: request.barcode || 'none',
         error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString(),
       });
@@ -415,14 +419,14 @@ export class ScanOrchestrator {
         'research-agent',
         false,
         {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
           tier: request.tier,
           dimension: request.dimension,
         }
       );
     }
 
-    // Step 2: Save insight to MongoDB cache
+    // Step 2: Save insight to MongoDB cache (only if barcode provided)
     // Requirement 5.5: Save insight to MongoDB after Research Agent completes
     // Note: We save the first product from the analysis result
     const firstProduct = analysisResult.products[0];
@@ -432,74 +436,93 @@ export class ScanOrchestrator {
         'Research Agent returned no products',
         'research-agent',
         false,
-        { barcode: request.barcode }
+        { barcode: request.barcode || 'none' }
       );
     }
 
-    try {
-      await withRetry(
-        async () => await this.cacheRepo.set(
-          request.barcode,
-          firstProduct.productName,
-          firstProduct.insights,
-          30 // 30 days TTL
-        ),
-        3,
-        1000
-      );
-      
-      console.log('[ScanOrchestrator] Saved insight to MongoDB cache:', {
-        barcode: request.barcode,
-        productName: firstProduct.productName,
-      });
-    } catch (error) {
-      // Log error but continue - cache save failure shouldn't fail the scan
-      // Requirement 10.5: Log all database errors with context
-      console.error('[ScanOrchestrator] Failed to save insight to cache (continuing):', {
-        barcode: request.barcode,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    // Step 3: Upsert product to Supabase
-    // Requirement 5.6: Save or update product metadata in Supabase
-    let product;
-    try {
-      product = await withRetry(
-        async () => await this.productRepo.upsert({
-          barcode: request.barcode,
-          name: firstProduct.productName,
-          // Extract brand from product name if possible (simple heuristic)
-          brand: this.extractBrand(firstProduct.productName),
-        }),
-        3,
-        1000
-      );
-      
-      console.log('[ScanOrchestrator] Saved product to Supabase:', {
-        barcode: request.barcode,
-        productId: product.id,
-        productName: product.name,
-      });
-    } catch (error) {
-      // Requirement 10.5: Log all database errors with context
-      console.error('[ScanOrchestrator] Failed to save product to Supabase:', {
-        barcode: request.barcode,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-
-      throw this.createError(
-        'PRODUCT_SAVE_FAILED',
-        `Failed to save product to Supabase: ${error instanceof Error ? error.message : String(error)}`,
-        'supabase',
-        true,
-        {
+    if (request.barcode) {
+      try {
+        await withRetry(
+          async () => await this.cacheRepo.set(
+            request.barcode!,
+            firstProduct.productName,
+            firstProduct.insights,
+            30 // 30 days TTL
+          ),
+          3,
+          1000
+        );
+        
+        console.log('[ScanOrchestrator] Saved insight to MongoDB cache:', {
           barcode: request.barcode,
           productName: firstProduct.productName,
-        }
-      );
+        });
+      } catch (error) {
+        // Log error but continue - cache save failure shouldn't fail the scan
+        // Requirement 10.5: Log all database errors with context
+        console.error('[ScanOrchestrator] Failed to save insight to cache (continuing):', {
+          barcode: request.barcode,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } else {
+      console.log('[ScanOrchestrator] No barcode provided, skipping cache save');
+    }
+
+    // Step 3: Upsert product to Supabase (only if barcode provided)
+    // Requirement 5.6: Save or update product metadata in Supabase
+    let product;
+    
+    if (request.barcode) {
+      try {
+        product = await withRetry(
+          async () => await this.productRepo.upsert({
+            barcode: request.barcode!,
+            name: firstProduct.productName,
+            // Extract brand from product name if possible (simple heuristic)
+            brand: this.extractBrand(firstProduct.productName),
+          }),
+          3,
+          1000
+        );
+        
+        console.log('[ScanOrchestrator] Saved product to Supabase:', {
+          barcode: request.barcode,
+          productId: product.id,
+          productName: product.name,
+        });
+      } catch (error) {
+        // Requirement 10.5: Log all database errors with context
+        console.error('[ScanOrchestrator] Failed to save product to Supabase:', {
+          barcode: request.barcode,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+
+        throw this.createError(
+          'PRODUCT_SAVE_FAILED',
+          `Failed to save product to Supabase: ${error instanceof Error ? error.message : String(error)}`,
+          'supabase',
+          true,
+          {
+            barcode: request.barcode,
+            productName: firstProduct.productName,
+          }
+        );
+      }
+    } else {
+      // Create a minimal product object without saving to database
+      console.log('[ScanOrchestrator] No barcode provided, creating minimal product object');
+      product = {
+        id: '',
+        barcode: '',
+        name: firstProduct.productName,
+        brand: this.extractBrand(firstProduct.productName),
+        last_scanned_at: new Date().toISOString(),
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
     }
 
     // Step 4: Return new insight
