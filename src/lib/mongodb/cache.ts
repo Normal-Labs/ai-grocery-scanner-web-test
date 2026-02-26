@@ -233,8 +233,8 @@ export class MongoDBCacheRepository {
         query,
         {
           $set: {
-            barcode: barcode || null,
-            imageHash: imageHash || null,
+            barcode: barcode || undefined,
+            imageHash: imageHash || undefined,
             productName,
             insights,
             expiresAt

@@ -1,16 +1,18 @@
 /**
- * Multi-Tier Scan API Endpoint
+ * Multi-Tier Scan API Endpoint with Dimension Analysis
  * 
  * POST /api/scan-multi-tier
  * 
- * This endpoint handles product scanning using the multi-tier identification system.
- * Supports both barcode-based and image-based scanning with intelligent fallback.
+ * This endpoint handles product scanning using the multi-tier identification system
+ * and extends it with AI-powered dimension analysis across 5 dimensions.
  * 
- * Requirements: 1.2, 2.1, 4.1
+ * Requirements: 1.2, 2.1, 4.1, 8.1, 8.2, 8.3, 8.5, 8.7
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createScanOrchestrator } from '@/lib/orchestrator/ScanOrchestratorMultiTier';
+import { IntegrationLayer } from '@/lib/integration/IntegrationLayer';
+import { dimensionAnalyzer } from '@/lib/analyzer/DimensionAnalyzer';
 import { hashImage } from '@/lib/imageHash';
 import { ScanRequest, ImageData } from '@/lib/types/multi-tier';
 
@@ -19,11 +21,14 @@ import { ScanRequest, ImageData } from '@/lib/types/multi-tier';
  * 
  * Request body:
  * {
- *   barcode?: string;           // Optional barcode from Tier 1 scanner
- *   image?: string;             // Optional base64 image data
- *   imageMimeType?: string;     // Image MIME type (e.g., 'image/jpeg')
- *   userId: string;             // User ID for tracking
- *   sessionId: string;          // Session ID for grouping scans
+ *   barcode?: string;                    // Optional barcode from Tier 1 scanner
+ *   image?: string;                      // Optional base64 image data
+ *   imageMimeType?: string;              // Image MIME type (e.g., 'image/jpeg')
+ *   userId: string;                      // User ID for tracking
+ *   sessionId: string;                   // Session ID for grouping scans
+ *   skipDimensionAnalysis?: boolean;     // Optional flag to skip dimension analysis
+ *   pollToken?: string;                  // Optional token for polling dimension status
+ *   devUserTier?: 'free' | 'premium';    // Development: Override user tier
  * }
  * 
  * Response:
@@ -34,6 +39,15 @@ import { ScanRequest, ImageData } from '@/lib/types/multi-tier';
  *   confidenceScore: number;
  *   processingTimeMs: number;
  *   cached: boolean;
+ *   
+ *   // New dimension analysis fields
+ *   dimensionAnalysis?: DimensionAnalysisResult;
+ *   dimensionStatus: 'completed' | 'processing' | 'failed' | 'skipped';
+ *   dimensionCached?: boolean;
+ *   userTier: 'free' | 'premium';
+ *   availableDimensions: string[];
+ *   upgradePrompt?: string;
+ *   
  *   error?: ErrorDetails;
  * }
  */
@@ -45,7 +59,16 @@ export async function POST(request: NextRequest) {
 
     // Parse request body
     const body = await request.json();
-    const { barcode, image, imageMimeType, userId, sessionId } = body;
+    const { 
+      barcode, 
+      image, 
+      imageMimeType, 
+      userId, 
+      sessionId,
+      skipDimensionAnalysis = false,  // Requirement 8.3
+      pollToken,                       // Requirement 8.5
+      devUserTier,                     // Development: Override user tier
+    } = body;
 
     // Validate required fields
     if (!userId) {
@@ -121,16 +144,29 @@ export async function POST(request: NextRequest) {
       sessionId,
     };
 
-    console.log('[Scan API Multi-Tier] 🚀 Invoking Scan Orchestrator:', {
+    console.log('[Scan API Multi-Tier] 🚀 Invoking Integration Layer:', {
       hasBarcode: !!barcode,
       hasImage: !!imageData,
       userId,
       sessionId,
+      skipDimensionAnalysis,
+      devUserTier: devUserTier || 'not set',
     });
 
-    // Create orchestrator and process scan
+    // Set development tier override if provided
+    if (devUserTier === 'premium' || devUserTier === 'free') {
+      process.env.DEV_USER_TIER = devUserTier;
+      console.log(`[Scan API Multi-Tier] 🔧 DEV MODE: User tier set to '${devUserTier}'`);
+    }
+
+    // Create orchestrator and integration layer
+    // Requirement 8.1: Extend existing /api/scan endpoint
     const orchestrator = createScanOrchestrator();
-    const result = await orchestrator.scan(scanRequest);
+    const integrationLayer = new IntegrationLayer(orchestrator, dimensionAnalyzer);
+    
+    // Process scan with dimension analysis
+    // Requirement 8.2: Return both product identification and dimension analysis
+    const result = await integrationLayer.processScan(scanRequest, skipDimensionAnalysis);
 
     const totalTime = Date.now() - startTime;
 
@@ -139,6 +175,9 @@ export async function POST(request: NextRequest) {
       tier: result.tier,
       confidence: result.confidenceScore,
       cached: result.cached,
+      dimensionStatus: result.dimensionStatus,
+      dimensionCached: result.dimensionCached,
+      userTier: result.userTier,
       processingTimeMs: result.processingTimeMs,
       totalTimeMs: totalTime,
     });
@@ -156,10 +195,20 @@ export async function POST(request: NextRequest) {
     console.log(`Confidence: ${(result.confidenceScore * 100).toFixed(1)}%`);
     console.log(`Data Source: ${result.cached ? '💾 Cache' : '🤖 Fresh Analysis'}`);
     console.log(`Processing Time: ${result.processingTimeMs}ms`);
+    console.log('───────────────────────────────────────────────────');
+    console.log('🎯 DIMENSION ANALYSIS');
+    console.log('───────────────────────────────────────────────────');
+    console.log(`Status: ${result.dimensionStatus}`);
+    console.log(`User Tier: ${result.userTier}`);
+    console.log(`Available Dimensions: ${result.availableDimensions.join(', ')}`);
+    if (result.dimensionAnalysis) {
+      console.log(`Dimension Cache: ${result.dimensionCached ? '💾 Hit' : '🤖 Fresh'}`);
+      console.log(`Overall Confidence: ${(result.dimensionAnalysis.overallConfidence * 100).toFixed(1)}%`);
+    }
     console.log(`Total Time: ${totalTime}ms`);
     console.log('═══════════════════════════════════════════════════');
 
-    // Return response
+    // Return response (Requirement 8.7: Maintain backward compatibility)
     return NextResponse.json(result, {
       status: result.success ? 200 : 500,
     });
@@ -180,6 +229,9 @@ export async function POST(request: NextRequest) {
         confidenceScore: 0,
         processingTimeMs: totalTime,
         cached: false,
+        dimensionStatus: 'failed',
+        userTier: 'free',
+        availableDimensions: [],
         error: {
           code: 'INTERNAL_ERROR',
           message: error instanceof Error ? error.message : 'An unexpected error occurred',
@@ -199,16 +251,34 @@ export async function POST(request: NextRequest) {
  */
 export async function GET() {
   return NextResponse.json({
-    name: 'Multi-Tier Product Identification API',
-    version: '1.0.0',
+    name: 'Multi-Tier Product Identification & Dimension Analysis API',
+    version: '2.0.0',
     tiers: {
       1: 'Direct Barcode Scanning (Cache + Database)',
       2: 'Visual Text Extraction (Gemini OCR)',
-      3: 'Discovery Search (Barcode Lookup API) - Not Implemented',
+      3: 'Discovery Search (Barcode Lookup API)',
       4: 'Comprehensive Image Analysis (Gemini AI)',
+    },
+    dimensions: {
+      health: 'Nutritional value and health impact',
+      processing: 'Level of processing and preservatives',
+      allergens: 'Common allergens and cross-contamination risks',
+      responsiblyProduced: 'Ethical sourcing and fair trade practices',
+      environmentalImpact: 'Packaging sustainability and carbon footprint',
+    },
+    features: {
+      productIdentification: 'Multi-tier product identification with intelligent fallback',
+      dimensionAnalysis: 'AI-powered analysis across 5 dimensions',
+      caching: '90-day cache for product identification, 30-day cache for dimension analysis',
+      tierBasedAccess: 'Free tier: 1 dimension (Health), Premium tier: all 5 dimensions',
+    },
+    development: {
+      tierToggle: 'Set devUserTier to "free" or "premium" in request body to override user tier',
+      envVariable: 'Or set DEV_USER_TIER environment variable to "free" or "premium"',
     },
     endpoints: {
       scan: 'POST /api/scan-multi-tier',
+      info: 'GET /api/scan-multi-tier',
     },
     status: 'operational',
   });

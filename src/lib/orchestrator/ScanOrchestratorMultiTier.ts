@@ -612,9 +612,21 @@ export class ScanOrchestratorMultiTier {
       
       console.log('[Scan Orchestrator] ✅ Tier 4: Matched to existing product');
       
-      // Cache by image hash (simple cache update, no transaction needed)
+      // Cache by image hash
       try {
         await this.cacheService.store(hash, 'imageHash', existingProductData, 4, analysisResult.confidence);
+        
+        // Also cache by barcode if available (for faster Tier 1 lookups)
+        if (existingProductData.barcode) {
+          await this.cacheService.store(
+            existingProductData.barcode,
+            'barcode',
+            existingProductData,
+            4,
+            analysisResult.confidence
+          );
+          console.log('[Scan Orchestrator] 💾 Also cached by barcode for Tier 1');
+        }
       } catch (error) {
         console.error('[Scan Orchestrator] ⚠️  Failed to cache Tier 4 result:', error);
       }
@@ -632,6 +644,23 @@ export class ScanOrchestratorMultiTier {
           4,
           analysisResult.confidence
         );
+        
+        // Also cache by barcode if available (for faster Tier 1 lookups)
+        if (savedProduct.barcode) {
+          try {
+            await this.cacheService.store(
+              savedProduct.barcode,
+              'barcode',
+              savedProduct,
+              4,
+              analysisResult.confidence
+            );
+            console.log('[Scan Orchestrator] 💾 Also cached by barcode for Tier 1');
+          } catch (error) {
+            console.error('[Scan Orchestrator] ⚠️  Failed to cache by barcode:', error);
+            // Non-critical - continue
+          }
+        }
         
         console.log('[Scan Orchestrator] ✅ Tier 4: Created new product with atomic cache update');
         return { product: savedProduct, confidence: analysisResult.confidence };

@@ -49,3 +49,17 @@ export interface CacheStats {
   oldestEntry: Date | null;
   newestEntry: Date | null;
 }
+
+/**
+ * Cached insight (legacy type for backward compatibility)
+ * Used by the old scan orchestrator
+ */
+export interface CachedInsight {
+  _id?: ObjectId;
+  barcode: string;
+  productName: string;
+  insights: any;
+  lastScannedAt: Date;
+  scanCount: number;
+  createdAt: Date;
+}

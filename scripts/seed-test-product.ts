@@ -34,7 +34,7 @@ async function seedTestProduct() {
   
   const { data, error } = await supabase
     .from('products')
-    .insert(testProduct)
+    .insert(testProduct as any)
     .select()
     .single();
   
@@ -44,9 +44,9 @@ async function seedTestProduct() {
   }
   
   console.log('✅ Test product seeded successfully!');
-  console.log('Product ID:', data.id);
-  console.log('Barcode:', data.barcode);
-  console.log('Name:', data.name);
+  console.log('Product ID:', (data as any).id);
+  console.log('Barcode:', (data as any).barcode);
+  console.log('Name:', (data as any).name);
   console.log('\n📝 Now you can test scanning barcode 0044000034207');
   console.log('   It should succeed at Tier 1 (cache/database lookup)');
 }

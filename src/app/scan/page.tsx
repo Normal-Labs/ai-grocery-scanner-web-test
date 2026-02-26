@@ -30,6 +30,30 @@ interface ScanResult {
     code: string;
     message: string;
   };
+  // Dimension analysis fields
+  dimensionAnalysis?: {
+    dimensions: {
+      health: DimensionScore;
+      processing: DimensionScore;
+      allergens: DimensionScore;
+      responsiblyProduced: DimensionScore;
+      environmentalImpact: DimensionScore;
+    };
+    overallConfidence: number;
+  };
+  dimensionStatus?: 'completed' | 'processing' | 'failed' | 'skipped';
+  dimensionCached?: boolean;
+  userTier?: 'free' | 'premium';
+  availableDimensions?: string[];
+  upgradePrompt?: string;
+}
+
+interface DimensionScore {
+  score: number;
+  explanation: string;
+  keyFactors: string[];
+  available: boolean;
+  locked: boolean;
 }
 
 export default function ScanPage() {
@@ -37,6 +61,7 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<string>('');
+  const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('free');
 
   const handleScanComplete = async (scanData: {
     barcode?: string;
@@ -57,6 +82,7 @@ export default function ScanPage() {
       const body: any = {
         userId: 'user-' + Date.now(), // In production, use actual user ID
         sessionId: 'session-' + Date.now(),
+        devUserTier, // Add tier toggle
       };
 
       if (scanData.barcode) {
@@ -125,10 +151,36 @@ export default function ScanPage() {
       {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-4xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-900">Product Scanner</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Scan barcodes or product packaging
-          </p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Product Scanner</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                Scan barcodes or product packaging
+              </p>
+            </div>
+            
+            {/* Tier Toggle */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">Dev Mode:</span>
+              <button
+                onClick={() => setDevUserTier(devUserTier === 'free' ? 'premium' : 'free')}
+                className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors ${
+                  devUserTier === 'premium' ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
+                    devUserTier === 'premium' ? 'translate-x-9' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={`text-sm font-semibold ${
+                devUserTier === 'premium' ? 'text-blue-600' : 'text-gray-600'
+              }`}>
+                {devUserTier === 'premium' ? '💎 Premium' : '📋 Free'}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -253,6 +305,136 @@ export default function ScanPage() {
                 </div>
               )}
             </div>
+
+            {/* Dimension Analysis Results */}
+            {result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    🎯 Dimension Analysis
+                  </h3>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    result.dimensionCached 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {result.dimensionCached ? '💾 Cached' : '🤖 Fresh'}
+                  </span>
+                </div>
+
+                {/* User Tier Badge */}
+                <div className="mb-4 flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    result.userTier === 'premium'
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {result.userTier === 'premium' ? '💎 Premium Tier' : '📋 Free Tier'}
+                  </span>
+                  {result.upgradePrompt && (
+                    <span className="text-sm text-gray-600">
+                      {result.upgradePrompt}
+                    </span>
+                  )}
+                </div>
+
+                {/* Dimensions Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(result.dimensionAnalysis.dimensions).map(([key, dimension]) => {
+                    const getScoreColor = (score: number) => {
+                      if (score >= 67) return 'text-green-600 bg-green-50';
+                      if (score >= 34) return 'text-yellow-600 bg-yellow-50';
+                      return 'text-red-600 bg-red-50';
+                    };
+
+                    const getDimensionLabel = (key: string) => {
+                      const labels: Record<string, string> = {
+                        health: '🏥 Health',
+                        processing: '🏭 Processing',
+                        allergens: '⚠️ Allergens',
+                        responsiblyProduced: '🌱 Responsible',
+                        environmentalImpact: '🌍 Environmental',
+                      };
+                      return labels[key] || key;
+                    };
+
+                    return (
+                      <div
+                        key={key}
+                        className={`p-4 rounded-lg border-2 ${
+                          dimension.locked
+                            ? 'bg-gray-50 border-gray-200 opacity-60'
+                            : 'bg-white border-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-semibold text-gray-900">
+                            {getDimensionLabel(key)}
+                          </span>
+                          {dimension.locked ? (
+                            <span className="text-2xl">🔒</span>
+                          ) : (
+                            <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(dimension.score)}`}>
+                              {dimension.score}
+                            </span>
+                          )}
+                        </div>
+                        {dimension.available && !dimension.locked && (
+                          <div>
+                            <p className="text-sm text-gray-600 mb-2">
+                              {dimension.explanation}
+                            </p>
+                            {dimension.keyFactors && dimension.keyFactors.length > 0 && (
+                              <ul className="text-xs text-gray-500 space-y-1">
+                                {dimension.keyFactors.map((factor, idx) => (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="mr-1">•</span>
+                                    <span>{factor}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                        {dimension.locked && (
+                          <p className="text-sm text-gray-500 italic">
+                            Upgrade to Premium to unlock
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Overall Confidence */}
+                <div className="mt-4 pt-4 border-t text-center">
+                  <span className="text-sm text-gray-600">
+                    Analysis Confidence: {' '}
+                    <span className="font-semibold">
+                      {(result.dimensionAnalysis.overallConfidence * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Dimension Analysis Failed */}
+            {result.dimensionStatus === 'failed' && (
+              <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6">
+                <div className="flex items-start">
+                  <span className="text-2xl mr-3">⚠️</span>
+                  <div>
+                    <h3 className="font-semibold text-yellow-900 mb-1">
+                      Dimension Analysis Unavailable
+                    </h3>
+                    <p className="text-yellow-800 text-sm">
+                      Product was identified successfully, but dimension analysis failed. 
+                      This may be due to API rate limits. Try again in a moment.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Action Buttons */}
             <div className="flex gap-4">

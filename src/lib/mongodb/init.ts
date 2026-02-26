@@ -14,8 +14,7 @@ import { getMongoClient } from './client';
  * Creates cache_entries collection with required indexes
  */
 export async function initializeMongoDB(): Promise<void> {
-  const client = await getMongoClient();
-  const db = client.db(process.env.MONGODB_DB_NAME || 'ai_grocery_scanner');
+  const db = await getMongoClient();
 
   console.log('Initializing MongoDB collections and indexes...');
 

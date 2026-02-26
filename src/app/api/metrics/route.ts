@@ -132,17 +132,17 @@ export async function GET(request: NextRequest) {
     const tiers = [1, 2, 3, 4];
 
     for (const tier of tiers) {
-      const tierLogs = scanLogs?.filter((log) => log.tier === tier) || [];
+      const tierLogs = scanLogs?.filter((log: any) => log.tier === tier) || [];
       const totalScans = tierLogs.length;
-      const successfulScans = tierLogs.filter((log) => log.success).length;
-      const cachedScans = tierLogs.filter((log) => log.cached).length;
+      const successfulScans = tierLogs.filter((log: any) => log.success).length;
+      const cachedScans = tierLogs.filter((log: any) => log.cached).length;
       
       // Calculate average processing time (only for successful scans with processing time)
       const logsWithProcessingTime = tierLogs.filter(
-        (log) => log.success && log.processing_time_ms !== null
+        (log: any) => log.success && log.processing_time_ms !== null
       );
       const avgProcessingTime = logsWithProcessingTime.length > 0
-        ? logsWithProcessingTime.reduce((sum, log) => sum + (log.processing_time_ms || 0), 0) / 
+        ? logsWithProcessingTime.reduce((sum: number, log: any) => sum + (log.processing_time_ms || 0), 0) / 
           logsWithProcessingTime.length
         : 0;
 
@@ -156,9 +156,9 @@ export async function GET(request: NextRequest) {
 
     // Calculate API usage
     // Tier 2 uses Gemini OCR, Tier 3 uses Barcode Lookup API, Tier 4 uses Gemini AI
-    const tier2Scans = scanLogs?.filter((log) => log.tier === 2 && !log.cached).length || 0;
-    const tier3Scans = scanLogs?.filter((log) => log.tier === 3 && !log.cached).length || 0;
-    const tier4Scans = scanLogs?.filter((log) => log.tier === 4 && !log.cached).length || 0;
+    const tier2Scans = scanLogs?.filter((log: any) => log.tier === 2 && !log.cached).length || 0;
+    const tier3Scans = scanLogs?.filter((log: any) => log.tier === 3 && !log.cached).length || 0;
+    const tier4Scans = scanLogs?.filter((log: any) => log.tier === 4 && !log.cached).length || 0;
 
     const geminiCalls = tier2Scans + tier4Scans; // Tier 2 (OCR) + Tier 4 (full analysis)
     const barcodeLookupCalls = tier3Scans;
@@ -175,14 +175,14 @@ export async function GET(request: NextRequest) {
 
     // Calculate overall metrics
     const totalScans = scanLogs?.length || 0;
-    const successfulScans = scanLogs?.filter((log) => log.success).length || 0;
-    const cachedScans = scanLogs?.filter((log) => log.cached).length || 0;
+    const successfulScans = scanLogs?.filter((log: any) => log.success).length || 0;
+    const cachedScans = scanLogs?.filter((log: any) => log.cached).length || 0;
     
     const logsWithProcessingTime = scanLogs?.filter(
-      (log) => log.success && log.processing_time_ms !== null
+      (log: any) => log.success && log.processing_time_ms !== null
     ) || [];
     const overallAvgProcessingTime = logsWithProcessingTime.length > 0
-      ? logsWithProcessingTime.reduce((sum, log) => sum + (log.processing_time_ms || 0), 0) / 
+      ? logsWithProcessingTime.reduce((sum: number, log: any) => sum + (log.processing_time_ms || 0), 0) / 
         logsWithProcessingTime.length
       : 0;
 

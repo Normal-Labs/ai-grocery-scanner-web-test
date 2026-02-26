@@ -185,6 +185,108 @@ Return ONLY the JSON object, no additional text.`
   }
 
   /**
+   * Analyze product dimensions (Health, Processing, Allergens, etc.)
+   * Requirements: 3.1, 3.2, 7.3, 12.1, 12.2, 12.3, 12.4, 12.5, 12.6
+   * 
+   * @param image - Product image data
+   * @param productData - Product context (name, brand, category)
+   * @returns Promise resolving to dimension analysis in JSON format
+   */
+  async analyzeDimensions(
+    image: ImageData,
+    productData: { name: string; brand: string; category: string }
+  ): Promise<string> {
+    const startTime = Date.now();
+
+    try {
+      console.log('[Gemini Client] 🎯 Analyzing product dimensions...');
+
+      const imageDataUrl = `data:${image.mimeType};base64,${image.base64}`;
+
+      // Build analysis prompt (Requirement 12.1-12.6)
+      const prompt = this.buildDimensionAnalysisPrompt(productData);
+
+      const result = await generateText({
+        model: google(this.model),
+        temperature: 0.2, // Lower temperature for consistent scoring
+        messages: [
+          {
+            role: 'user',
+            content: [
+              {
+                type: 'text',
+                text: prompt,
+              },
+              {
+                type: 'image',
+                image: imageDataUrl,
+              },
+            ],
+          },
+        ],
+      });
+
+      const duration = Date.now() - startTime;
+      console.log(`[Gemini Client] ✅ Dimensions analyzed (${duration}ms)`);
+
+      return result.text;
+    } catch (error) {
+      const duration = Date.now() - startTime;
+      console.error(`[Gemini Client] ❌ Dimension analysis failed (${duration}ms):`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Build dimension analysis prompt
+   * Requirements: 12.1, 12.2, 12.3, 12.4, 12.5, 12.6
+   * 
+   * @param productData - Product context
+   * @returns Structured prompt for dimension analysis
+   */
+  private buildDimensionAnalysisPrompt(productData: {
+    name: string;
+    brand: string;
+    category: string;
+  }): string {
+    return `Analyze this product across 5 dimensions and return results in JSON format.
+
+Product Context:
+- Name: ${productData.name}
+- Brand: ${productData.brand}
+- Category: ${productData.category}
+
+Analyze the following dimensions (score 0-100 for each):
+
+1. Health: Nutritional value, beneficial ingredients, health impact
+2. Processing and Preservatives: Level of processing, artificial additives, preservatives
+3. Allergens: Common allergens present, cross-contamination risks
+4. Responsibly Produced: Ethical sourcing, fair trade, labor practices
+5. Environmental Impact: Packaging sustainability, carbon footprint, eco-friendliness
+
+For each dimension, provide:
+- score (0-100, where 100 is best)
+- explanation (max 100 words)
+- keyFactors (array of 2-4 key points)
+
+Also provide an overallConfidence score (0.0-1.0) for the analysis.
+
+Return JSON in this exact format:
+{
+  "dimensions": {
+    "health": { "score": 0-100, "explanation": "...", "keyFactors": ["..."] },
+    "processing": { "score": 0-100, "explanation": "...", "keyFactors": ["..."] },
+    "allergens": { "score": 0-100, "explanation": "...", "keyFactors": ["..."] },
+    "responsiblyProduced": { "score": 0-100, "explanation": "...", "keyFactors": ["..."] },
+    "environmentalImpact": { "score": 0-100, "explanation": "...", "keyFactors": ["..."] }
+  },
+  "overallConfidence": 0.0-1.0
+}
+
+Return ONLY the JSON object, no additional text.`;
+  }
+
+  /**
    * Handle API rate limits with exponential backoff
    * Requirement 8.3: Handle API rate limits
    * 
