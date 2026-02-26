@@ -7,7 +7,7 @@
  * Integrates barcode detection with image-based fallback.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
@@ -66,6 +66,18 @@ export default function ScanPage() {
   const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('free');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<SavedScan[]>([]);
+  const [showScanner, setShowScanner] = useState(false);
+  const [hasHistoryItems, setHasHistoryItems] = useState(false);
+
+  // Check for history on client side only
+  useEffect(() => {
+    try {
+      const recentScans = getRecentAnalyses();
+      setHasHistoryItems(recentScans.length > 0);
+    } catch {
+      setHasHistoryItems(false);
+    }
+  }, [result]); // Re-check when a new scan completes
 
   const handleScanComplete = async (scanData: {
     barcode?: string;
@@ -233,6 +245,16 @@ export default function ScanPage() {
     }
   };
 
+  const handleStartScan = () => {
+    setShowScanner(true);
+    setResult(null);
+    setError('');
+  };
+
+  const handleCloseScan = () => {
+    setShowScanner(false);
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -271,7 +293,22 @@ export default function ScanPage() {
         </div>
       </div>
 
-      <div className="max-w-4xl mx-auto px-4 py-6">
+      <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+        {/* Scanner Modal */}
+        {showScanner && (
+          <div className="fixed inset-0 bg-black z-50 flex flex-col">
+            <div className="flex-1 overflow-auto">
+              <BarcodeScanner
+                onScanComplete={(scanData) => {
+                  handleCloseScan();
+                  handleScanComplete(scanData);
+                }}
+                onError={handleScanError}
+              />
+            </div>
+          </div>
+        )}
+
         {/* History View */}
         {showHistory ? (
           <div className="space-y-4">
@@ -348,13 +385,16 @@ export default function ScanPage() {
           </div>
         ) : (
           <>
-        {/* Scanner Section */}
-        {!result && !loading && (
-          <div className="bg-white rounded-lg shadow-lg p-6">
-            <BarcodeScanner
-              onScanComplete={handleScanComplete}
-              onError={handleScanError}
-            />
+        {/* Welcome Message - Show when no scan in progress and no results */}
+        {!loading && !result && (
+          <div className="text-center py-12">
+            <div className="text-6xl mb-4">🛒</div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">
+              Ready to Scan
+            </h2>
+            <p className="text-gray-600">
+              Tap the Scan button below to identify products
+            </p>
           </div>
         )}
 
@@ -599,30 +639,7 @@ export default function ScanPage() {
               </div>
             )}
 
-            {/* Action Buttons */}
-            <div className="flex gap-4">
-              <button
-                onClick={() => {
-                  setResult(null);
-                  setScanning(true);
-                }}
-                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-              >
-                🔄 Scan Another
-              </button>
-              
-              {result.success && result.product && (
-                <button
-                  onClick={() => {
-                    // TODO: Implement add to list functionality
-                    alert('Add to list functionality coming soon!');
-                  }}
-                  className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
-                >
-                  ✓ Add to List
-                </button>
-              )}
-            </div>
+            {/* Action Buttons - Removed, only Scan button in footer */}
 
             {/* Report Error Option */}
             {result.success && result.product && result.confidenceScore < 0.9 && (
@@ -639,45 +656,34 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Info Section */}
-        {!result && !loading && !error && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-semibold text-blue-900 mb-2">How it works:</h3>
-            <ul className="space-y-2 text-sm text-blue-800">
-              <li className="flex items-start">
-                <span className="mr-2">1️⃣</span>
-                <span>Take a photo of the product barcode or packaging</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">2️⃣</span>
-                <span>System automatically detects barcodes for instant lookup</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">3️⃣</span>
-                <span>If no barcode, AI analyzes the product image</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">4️⃣</span>
-                <span>Get product details in seconds!</span>
-              </li>
-            </ul>
-          </div>
-        )}
+        {/* Info Section - removed */}
           </>
         )}
       </div>
 
-      {/* Footer with History Button */}
-      {!showHistory && !loading && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg">
+      {/* Footer with Scan and History Buttons */}
+      {!showHistory && !showScanner && (
+        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40">
           <div className="max-w-4xl mx-auto px-4 py-3">
-            <button
-              onClick={handleViewHistory}
-              className="w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-            >
-              <span role="img" aria-label="history">📋</span>
-              View History
-            </button>
+            <div className="flex gap-3">
+              {hasHistoryItems && (
+                <button
+                  onClick={handleViewHistory}
+                  className="flex-1 min-h-[56px] px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
+                >
+                  <span role="img" aria-label="history" className="text-xl">📋</span>
+                  <span>History</span>
+                </button>
+              )}
+              <button
+                onClick={handleStartScan}
+                disabled={loading}
+                className={`${hasHistoryItems ? 'flex-1' : 'w-full'} min-h-[56px] px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 text-lg`}
+              >
+                <span role="img" aria-label="scan" className="text-2xl">📷</span>
+                <span>Scan</span>
+              </button>
+            </div>
           </div>
         </footer>
       )}

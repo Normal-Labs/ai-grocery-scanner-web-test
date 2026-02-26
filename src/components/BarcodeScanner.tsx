@@ -87,6 +87,13 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
     };
 
     checkBarcodeSupport();
+    
+    // Auto-start camera after a short delay to ensure DOM is ready
+    const timer = setTimeout(() => {
+      startCamera();
+    }, 100);
+
+    return () => clearTimeout(timer);
   }, []);
 
   // Start camera
@@ -108,8 +115,16 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        console.log('[Barcode Scanner] 📹 Camera started');
+        
+        // Wait for video to be ready before playing
+        videoRef.current.onloadedmetadata = async () => {
+          try {
+            await videoRef.current?.play();
+            console.log('[Barcode Scanner] 📹 Camera started');
+          } catch (playError) {
+            console.error('[Barcode Scanner] ❌ Play error:', playError);
+          }
+        };
       }
     } catch (error) {
       // Requirement 11.5: Handle initialization failures gracefully
@@ -260,26 +275,9 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
   }, []);
 
   return (
-    <div className="barcode-scanner">
-      {!isScanning && !capturedImage && (
-        <div className="text-center">
-          <button
-            onClick={startCamera}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
-          >
-            📷 Start Camera
-          </button>
-          
-          {!barcodeDetectorSupported && (
-            <p className="mt-4 text-sm text-yellow-600">
-              ⚠️ Barcode detection not supported in this browser. Will use image-based identification.
-            </p>
-          )}
-        </div>
-      )}
-
+    <div className="barcode-scanner h-full flex flex-col">
       {cameraError && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="p-4 bg-red-50 border border-red-200 rounded-lg m-4">
           <p className="text-red-800">
             <strong>Camera Error:</strong> {cameraError}
           </p>
@@ -290,10 +288,10 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
       )}
 
       {isScanning && (
-        <div className="relative">
+        <div className="relative flex-1 flex flex-col bg-black">
           <video
             ref={videoRef}
-            className="w-full rounded-lg"
+            className="w-full h-full object-cover"
             playsInline
             muted
           />
@@ -302,33 +300,35 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
             <div className="border-4 border-green-500 rounded-lg w-64 h-64 opacity-50" />
           </div>
 
-          <div className="mt-4 flex gap-4 justify-center">
-            <button
-              onClick={captureAndDetect}
-              disabled={processing}
-              className="px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 disabled:bg-gray-400 transition-colors"
-            >
-              {processing ? '⏳ Processing...' : '📸 Capture'}
-            </button>
-            
-            <button
-              onClick={stopCamera}
-              className="px-6 py-3 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
-            >
-              ✕ Cancel
-            </button>
-          </div>
+          <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black to-transparent">
+            <div className="flex gap-4 justify-center">
+              <button
+                onClick={stopCamera}
+                className="px-8 py-4 bg-red-600 text-white rounded-full font-semibold hover:bg-red-700 transition-colors text-lg"
+              >
+                ✕ Cancel
+              </button>
+              
+              <button
+                onClick={captureAndDetect}
+                disabled={processing}
+                className="px-8 py-4 bg-white text-gray-900 rounded-full font-semibold hover:bg-gray-100 disabled:bg-gray-400 transition-colors text-lg"
+              >
+                {processing ? '⏳ Processing...' : '📸 Capture'}
+              </button>
+            </div>
 
-          {barcodeDetectorSupported && (
-            <p className="mt-4 text-center text-sm text-gray-600">
-              📱 Point camera at barcode or product packaging
-            </p>
-          )}
+            {barcodeDetectorSupported && (
+              <p className="mt-4 text-center text-sm text-white">
+                📱 Point camera at barcode or product packaging
+              </p>
+            )}
+          </div>
         </div>
       )}
 
       {capturedImage && (
-        <div className="space-y-4">
+        <div className="space-y-4 p-4">
           <div className="relative">
             <img
               src={capturedImage}
