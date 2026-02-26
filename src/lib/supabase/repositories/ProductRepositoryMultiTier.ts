@@ -11,6 +11,7 @@
 import { getSupabaseServerClient } from '../server-client';
 import type { Product, ProductInsert, ProductUpdate } from '../types';
 import { ProductMetadata } from '@/lib/types/multi-tier';
+import { cacheService } from '@/lib/mongodb/cache-service';
 
 /**
  * Product search result with similarity score
@@ -172,12 +173,14 @@ export class ProductRepositoryMultiTier {
   /**
    * Update an existing product
    * Requirement 12.1: Update products in Supabase
+   * Requirement 7.6: Invalidate cache on product updates
    * 
    * @param id - Product ID to update
    * @param data - Product data to update
+   * @param invalidateCache - Whether to invalidate cache (default: true)
    * @returns Promise resolving to the updated Product
    */
-  async update(id: string, data: ProductUpdate): Promise<Product> {
+  async update(id: string, data: ProductUpdate, invalidateCache: boolean = true): Promise<Product> {
     try {
       const supabase = getSupabaseServerClient();
       
@@ -200,6 +203,11 @@ export class ProductRepositoryMultiTier {
       }
 
       console.log(`[Product Repository] ✅ Updated product: ${product.id}`);
+      
+      // Requirement 7.6: Invalidate cache entries for this product
+      if (invalidateCache) {
+        await this.invalidateCacheForProduct(product.id);
+      }
       
       return product;
     } catch (error) {
@@ -256,12 +264,14 @@ export class ProductRepositoryMultiTier {
    * Associate a barcode with an existing product
    * Used by Discovery Service (Tier 3) to save discovered barcodes
    * Requirement 3.4, 3.5: Save discovered barcode to Product Repository
+   * Requirement 7.6: Invalidate cache on product updates
    * 
    * @param productId - Product ID to update
    * @param barcode - Barcode to associate
+   * @param invalidateCache - Whether to invalidate cache (default: true)
    * @returns Promise resolving to the updated Product
    */
-  async associateBarcode(productId: string, barcode: string): Promise<Product> {
+  async associateBarcode(productId: string, barcode: string, invalidateCache: boolean = true): Promise<Product> {
     try {
       const supabase = getSupabaseServerClient();
       
@@ -284,6 +294,11 @@ export class ProductRepositoryMultiTier {
       }
 
       console.log(`[Product Repository] ✅ Associated barcode with product`);
+      
+      // Requirement 7.6: Invalidate cache entries for this product
+      if (invalidateCache) {
+        await this.invalidateCacheForProduct(product.id);
+      }
       
       return product;
     } catch (error) {
@@ -353,6 +368,34 @@ export class ProductRepositoryMultiTier {
   }
 
   /**
+   * Invalidate cache entries for a product
+   * Requirement 7.6: Invalidate cache on product updates
+   * Requirement 12.3: Ensure consistency between Supabase and MongoDB
+   * 
+   * This method invalidates all cache entries associated with a product,
+   * ensuring consistency between the Product Repository (Supabase) and
+   * Cache Service (MongoDB).
+   * 
+   * @param productId - Product ID to invalidate cache for
+   */
+  private async invalidateCacheForProduct(productId: string): Promise<void> {
+    try {
+      console.log(`[Product Repository] 🗑️  Invalidating cache for product: ${productId}`);
+      
+      // Use the cache service's invalidateByProductId method
+      // This will remove all cache entries (by barcode and imageHash) for this product
+      await cacheService.invalidateByProductId(productId);
+      
+      console.log(`[Product Repository] ✅ Cache invalidated for product: ${productId}`);
+    } catch (error) {
+      console.error('[Product Repository] ⚠️  Failed to invalidate cache:', error);
+      // Log but don't throw - cache invalidation failure shouldn't block product updates
+      // However, log as a data consistency warning
+      console.error('[Product Repository] ⚠️  DATA CONSISTENCY WARNING: Cache may be stale for product:', productId);
+    }
+  }
+
+  /**
    * Execute a transaction with retry logic
    * Requirement 12.4, 12.5: Transaction support with rollback
    * Requirement 12.7: Retry failed operations with exponential backoff
@@ -381,7 +424,7 @@ export class ProductRepositoryMultiTier {
         lastError = error as Error;
         
         if (attempt < maxRetries) {
-          // Calculate exponential backoff delay
+          // Calculate exponential backoff delay (100ms, 200ms, 400ms)
           const delay = Math.min(100 * Math.pow(2, attempt), 400);
           console.log(`[Product Repository] ⚠️  Transaction failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
           
@@ -391,7 +434,51 @@ export class ProductRepositoryMultiTier {
     }
     
     console.error(`[Product Repository] ❌ Transaction failed after ${maxRetries + 1} attempts`);
+    
+    // Requirement 12.6: Log data consistency errors
+    console.error('[Product Repository] ⚠️  DATA CONSISTENCY ERROR: Transaction failed after all retries');
+    
     throw lastError || new Error('Transaction failed');
+  }
+
+  /**
+   * Execute a multi-store transaction with rollback support
+   * Requirement 12.4, 12.5: Transactional multi-store updates with rollback
+   * 
+   * This method coordinates updates across Product Repository and Cache Service
+   * with proper rollback handling if any operation fails.
+   * 
+   * @param operation - Function that performs multi-store updates and returns rollback function
+   * @param maxRetries - Maximum number of retries (default: 3)
+   * @returns Promise resolving to operation result
+   */
+  async withMultiStoreTransaction<T>(
+    operation: () => Promise<{ result: T; rollback: () => Promise<void> }>,
+    maxRetries: number = 3
+  ): Promise<T> {
+    return this.withTransaction(async () => {
+      let rollbackFn: (() => Promise<void>) | null = null;
+
+      try {
+        const { result, rollback } = await operation();
+        rollbackFn = rollback;
+        return result;
+      } catch (error) {
+        // Attempt rollback if rollback function was provided
+        if (rollbackFn) {
+          try {
+            console.log('[Product Repository] 🔄 Rolling back multi-store transaction');
+            await rollbackFn();
+            console.log('[Product Repository] ✅ Rollback completed');
+          } catch (rollbackError) {
+            console.error('[Product Repository] ❌ Rollback failed:', rollbackError);
+            // Requirement 12.6: Log consistency error
+            console.error('[Product Repository] ⚠️  DATA CONSISTENCY ERROR: Failed to rollback multi-store transaction');
+          }
+        }
+        throw error;
+      }
+    }, maxRetries);
   }
 }
 

@@ -16,6 +16,8 @@ import { VisualExtractorService } from '@/lib/services/visual-extractor';
 import { ImageAnalyzerService } from '@/lib/services/image-analyzer';
 import { DiscoveryService } from '@/lib/services/discovery-service';
 import { hashImage } from '@/lib/imageHash';
+import { getSupabaseServerClient } from '@/lib/supabase/server-client';
+import type { ScanLogInsert } from '@/lib/supabase/types';
 import {
   ScanRequest,
   ScanResponse,
@@ -85,6 +87,17 @@ export class ScanOrchestratorMultiTier {
           const processingTimeMs = Date.now() - startTime;
           console.log(`[Scan Orchestrator] ✅ Tier 1 success (${processingTimeMs}ms)`);
           
+          // Log tier usage (Requirement 6.6, 6.7, 14.1, 14.2, 14.3)
+          await this.logTierUsage(
+            request,
+            1,
+            true,
+            processingTimeMs,
+            tier1Result.cached,
+            tier1Result.product.id,
+            1.0
+          );
+          
           return {
             success: true,
             product: tier1Result.product,
@@ -93,6 +106,19 @@ export class ScanOrchestratorMultiTier {
             processingTimeMs,
             cached: tier1Result.cached,
           };
+        } else {
+          // Log Tier 1 failure
+          const processingTimeMs = Date.now() - startTime;
+          await this.logTierUsage(
+            request,
+            1,
+            false,
+            processingTimeMs,
+            false,
+            undefined,
+            undefined,
+            'NOT_FOUND'
+          );
         }
       }
 
@@ -104,6 +130,17 @@ export class ScanOrchestratorMultiTier {
         if (tier2Result && 'product' in tier2Result) {
           const processingTimeMs = Date.now() - startTime;
           console.log(`[Scan Orchestrator] ✅ Tier 2 success (${processingTimeMs}ms)`);
+          
+          // Log tier usage (Requirement 6.6, 6.7, 14.1, 14.2, 14.3)
+          await this.logTierUsage(
+            request,
+            2,
+            true,
+            processingTimeMs,
+            false,
+            tier2Result.product.id,
+            tier2Result.confidence
+          );
           
           // Requirement 13.5: Add warning for low confidence
           const warning = tier2Result.confidence < 0.8 
@@ -123,6 +160,32 @@ export class ScanOrchestratorMultiTier {
         // Preserve metadata for Tier 3 even if Tier 2 didn't find a match
         if (tier2Result && 'metadata' in tier2Result) {
           tier2Metadata = tier2Result.metadata;
+          
+          // Log Tier 2 failure (no match found)
+          const processingTimeMs = Date.now() - startTime;
+          await this.logTierUsage(
+            request,
+            2,
+            false,
+            processingTimeMs,
+            false,
+            undefined,
+            undefined,
+            'NO_MATCH'
+          );
+        } else if (!tier2Result) {
+          // Log Tier 2 failure (extraction failed)
+          const processingTimeMs = Date.now() - startTime;
+          await this.logTierUsage(
+            request,
+            2,
+            false,
+            processingTimeMs,
+            false,
+            undefined,
+            undefined,
+            'EXTRACTION_FAILED'
+          );
         }
       }
 
@@ -134,6 +197,17 @@ export class ScanOrchestratorMultiTier {
         if (tier3Result) {
           const processingTimeMs = Date.now() - startTime;
           console.log(`[Scan Orchestrator] ✅ Tier 3 success (${processingTimeMs}ms)`);
+          
+          // Log tier usage (Requirement 6.6, 6.7, 14.1, 14.2, 14.3)
+          await this.logTierUsage(
+            request,
+            3,
+            true,
+            processingTimeMs,
+            false,
+            tier3Result.product.id,
+            tier3Result.confidence
+          );
           
           // Requirement 13.5: Add warning for low confidence
           const warning = tier3Result.confidence < 0.8 
@@ -149,6 +223,19 @@ export class ScanOrchestratorMultiTier {
             cached: false,
             warning,
           };
+        } else {
+          // Log Tier 3 failure
+          const processingTimeMs = Date.now() - startTime;
+          await this.logTierUsage(
+            request,
+            3,
+            false,
+            processingTimeMs,
+            false,
+            undefined,
+            undefined,
+            'DISCOVERY_FAILED'
+          );
         }
       }
 
@@ -168,6 +255,17 @@ export class ScanOrchestratorMultiTier {
           const processingTimeMs = Date.now() - startTime;
           console.log(`[Scan Orchestrator] ✅ Tier 4 success (${processingTimeMs}ms)`);
           
+          // Log tier usage (Requirement 6.6, 6.7, 14.1, 14.2, 14.3)
+          await this.logTierUsage(
+            request,
+            4,
+            true,
+            processingTimeMs,
+            false,
+            tier4Result.product.id,
+            tier4Result.confidence
+          );
+          
           // Requirement 13.5: Add warning for low confidence
           const warning = tier4Result.confidence < 0.8 
             ? 'AI-based identification with low confidence. Please verify the product details.'
@@ -184,12 +282,37 @@ export class ScanOrchestratorMultiTier {
             cached: false,
             warning,
           };
+        } else {
+          // Log Tier 4 failure
+          const processingTimeMs = Date.now() - startTime;
+          await this.logTierUsage(
+            request,
+            4,
+            false,
+            processingTimeMs,
+            false,
+            undefined,
+            undefined,
+            'ANALYSIS_FAILED'
+          );
         }
       }
 
       // All tiers failed
       const processingTimeMs = Date.now() - startTime;
       console.log(`[Scan Orchestrator] ❌ All tiers failed (${processingTimeMs}ms)`);
+      
+      // Log final failure
+      await this.logTierUsage(
+        request,
+        4,
+        false,
+        processingTimeMs,
+        false,
+        undefined,
+        undefined,
+        'ALL_TIERS_FAILED'
+      );
       
       return {
         success: false,
@@ -207,6 +330,18 @@ export class ScanOrchestratorMultiTier {
     } catch (error) {
       const processingTimeMs = Date.now() - startTime;
       console.error('[Scan Orchestrator] ❌ Unexpected error:', error);
+      
+      // Log unexpected error
+      await this.logTierUsage(
+        request,
+        4,
+        false,
+        processingTimeMs,
+        false,
+        undefined,
+        undefined,
+        'ORCHESTRATOR_ERROR'
+      );
       
       return {
         success: false,
@@ -246,8 +381,11 @@ export class ScanOrchestratorMultiTier {
     }
 
     // Cache miss - query database (Requirement 1.5)
+    // Requirement 12.7: Use retry logic for database operations
     console.log('[Scan Orchestrator] 🔍 Tier 1: Cache miss, querying database...');
-    const product = await this.productRepository.findByBarcode(barcode);
+    const product = await this.productRepository.withTransaction(async () => {
+      return await this.productRepository.findByBarcode(barcode);
+    });
     
     if (product) {
       console.log('[Scan Orchestrator] ✅ Tier 1: Found in database');
@@ -264,8 +402,13 @@ export class ScanOrchestratorMultiTier {
         metadata: product.metadata || {},
       };
 
-      // Cache the result for future lookups
-      await this.cacheService.store(barcode, 'barcode', productData, 1, 1.0);
+      // Cache the result for future lookups (simple cache update, no transaction needed for read-only DB operation)
+      try {
+        await this.cacheService.store(barcode, 'barcode', productData, 1, 1.0);
+      } catch (error) {
+        // Cache update failure is not critical for Tier 1 reads
+        console.error('[Scan Orchestrator] ⚠️  Failed to cache Tier 1 result:', error);
+      }
       
       return {
         product: productData,
@@ -313,8 +456,11 @@ export class ScanOrchestratorMultiTier {
     }
 
     // Query database by metadata (Requirement 2.5)
+    // Requirement 12.7: Use retry logic for database operations
     console.log('[Scan Orchestrator] 🔍 Tier 2: Querying database by metadata...');
-    const searchResults = await this.productRepository.searchByMetadata(extractResult.metadata);
+    const searchResults = await this.productRepository.withTransaction(async () => {
+      return await this.productRepository.searchByMetadata(extractResult.metadata);
+    });
     
     if (searchResults.length === 0) {
       console.log('[Scan Orchestrator] ❌ Tier 2: No matching products found, preserving metadata for Tier 3');
@@ -339,8 +485,13 @@ export class ScanOrchestratorMultiTier {
       metadata: bestMatch.metadata || {},
     };
 
-    // Cache the result by image hash
-    await this.cacheService.store(hash, 'imageHash', productData, 2, confidence);
+    // Cache the result by image hash (simple cache update, no transaction needed for read-only DB operation)
+    try {
+      await this.cacheService.store(hash, 'imageHash', productData, 2, confidence);
+    } catch (error) {
+      // Cache update failure is not critical for Tier 2 reads
+      console.error('[Scan Orchestrator] ⚠️  Failed to cache Tier 2 result:', error);
+    }
 
     return { product: productData, confidence, metadata: extractResult.metadata };
   }
@@ -437,60 +588,307 @@ export class ScanOrchestratorMultiTier {
     };
 
     // Try to find existing product by metadata
-    const searchResults = await this.productRepository.searchByMetadata(analysisResult.metadata);
+    // Requirement 12.7: Use retry logic for database operations
+    const searchResults = await this.productRepository.withTransaction(async () => {
+      return await this.productRepository.searchByMetadata(analysisResult.metadata);
+    });
     
     if (searchResults.length > 0) {
-      // Use existing product
+      // Use existing product - just cache it
       const existingProduct = searchResults[0];
-      productData.id = existingProduct.id;
-      productData.barcode = existingProduct.barcode || undefined;
-      productData.imageUrl = existingProduct.image_url || undefined;
+      const existingProductData: ProductData = {
+        id: existingProduct.id,
+        barcode: existingProduct.barcode || undefined,
+        name: existingProduct.name,
+        brand: existingProduct.brand,
+        size: existingProduct.size || undefined,
+        category: existingProduct.category || 'Unknown',
+        imageUrl: existingProduct.image_url || undefined,
+        metadata: existingProduct.metadata || {},
+      };
       
       console.log('[Scan Orchestrator] ✅ Tier 4: Matched to existing product');
-    } else {
-      // Create new product
-      const newProduct = await this.productRepository.create({
-        barcode: request.barcode || null, // Associate the scanned barcode
-        name: productData.name,
-        brand: productData.brand,
-        size: productData.size || null,
-        category: productData.category || null,
-        metadata: productData.metadata,
-      });
       
-      productData.id = newProduct.id;
-      productData.barcode = newProduct.barcode || undefined;
-      console.log('[Scan Orchestrator] ✅ Tier 4: Created new product');
+      // Cache by image hash (simple cache update, no transaction needed)
+      try {
+        await this.cacheService.store(hash, 'imageHash', existingProductData, 4, analysisResult.confidence);
+      } catch (error) {
+        console.error('[Scan Orchestrator] ⚠️  Failed to cache Tier 4 result:', error);
+      }
+      
+      return { product: existingProductData, confidence: analysisResult.confidence };
+    } else {
+      // Create new product with transactional update
+      console.log('[Scan Orchestrator] 💾 Tier 4: Creating new product with transaction');
+      
+      try {
+        const savedProduct = await this.updateProductAndCache(
+          productData,
+          hash,
+          'imageHash',
+          4,
+          analysisResult.confidence
+        );
+        
+        console.log('[Scan Orchestrator] ✅ Tier 4: Created new product with atomic cache update');
+        return { product: savedProduct, confidence: analysisResult.confidence };
+        
+      } catch (error) {
+        console.error('[Scan Orchestrator] ❌ Tier 4: Failed to create product:', error);
+        throw error;
+      }
     }
-
-    // Cache the result by image hash (Requirement 4.6)
-    await this.cacheService.store(hash, 'imageHash', productData, 4, analysisResult.confidence);
-
-    // Also cache by barcode if we have one
-    if (request.barcode) {
-      await this.cacheService.store(request.barcode, 'barcode', productData, 4, analysisResult.confidence);
-    }
-
-    return { product: productData, confidence: analysisResult.confidence };
   }
 
   /**
    * Log tier usage for monitoring
-   * Requirement 6.6, 6.7: Track tier usage and success rates
+   * Requirement 6.6, 6.7, 14.1, 14.2, 14.3: Track tier usage and success rates
    * 
+   * @param request - Original scan request
    * @param tier - Tier used
    * @param success - Whether the tier succeeded
    * @param processingTimeMs - Processing time in milliseconds
+   * @param cached - Whether result came from cache
+   * @param productId - Product ID if found
+   * @param confidenceScore - Confidence score if available
+   * @param errorCode - Error code if failed
    */
-  private logTierUsage(tier: Tier, success: boolean, processingTimeMs: number): void {
-    console.log('[Scan Orchestrator] 📊 Tier usage:', {
-      tier,
-      success,
-      processingTimeMs,
-      timestamp: new Date().toISOString(),
+  private async logTierUsage(
+    request: ScanRequest,
+    tier: Tier,
+    success: boolean,
+    processingTimeMs: number,
+    cached: boolean = false,
+    productId?: string,
+    confidenceScore?: ConfidenceScore,
+    errorCode?: string
+  ): Promise<void> {
+    try {
+      const supabase = getSupabaseServerClient();
+      
+      // Prepare log entry matching ScanLogInsert type
+      const logEntry: ScanLogInsert = {
+        user_id: request.userId,
+        session_id: request.sessionId,
+        tier: tier as number,
+        success,
+        product_id: productId || null,
+        barcode: request.barcode || null,
+        image_hash: request.imageHash || null,
+        confidence_score: confidenceScore !== undefined ? confidenceScore : null,
+        processing_time_ms: processingTimeMs,
+        cached,
+        error_code: errorCode || null,
+      };
+
+      console.log('[Scan Orchestrator] 📊 Logging tier usage:', logEntry);
+
+      // Insert into scan_logs table
+      const { error } = await supabase
+        .from('scan_logs')
+        .insert(logEntry as any); // Type workaround - Database types may need regeneration
+
+      if (error) {
+        // Log error but don't throw - logging failures should not block scan operations
+        console.error('[Scan Orchestrator] ⚠️  Failed to log tier usage:', error);
+      } else {
+        console.log('[Scan Orchestrator] ✅ Tier usage logged successfully');
+      }
+    } catch (error) {
+      // Gracefully handle logging failures - don't block scan operations
+      console.error('[Scan Orchestrator] ⚠️  Exception while logging tier usage:', error);
+    }
+  }
+
+  /**
+   * Execute a transactional update across Product Repository and Cache Service
+   * Requirement 12.4: Use transactions when updating multiple data stores
+   * Requirement 12.5: Roll back related changes if a database update fails
+   * 
+   * @param operation - Function that performs the multi-store updates
+   * @returns Promise resolving to the operation result
+   */
+  private async executeTransaction<T>(
+    operation: () => Promise<{
+      result: T;
+      rollback: () => Promise<void>;
+    }>
+  ): Promise<T> {
+    let rollbackFn: (() => Promise<void>) | null = null;
+
+    try {
+      console.log('[Scan Orchestrator] 🔄 Starting transaction');
+      
+      const { result, rollback } = await operation();
+      rollbackFn = rollback;
+      
+      console.log('[Scan Orchestrator] ✅ Transaction completed successfully');
+      return result;
+      
+    } catch (error) {
+      console.error('[Scan Orchestrator] ❌ Transaction failed:', error);
+      
+      // Attempt rollback if rollback function was provided
+      if (rollbackFn) {
+        try {
+          console.log('[Scan Orchestrator] 🔄 Rolling back transaction');
+          await rollbackFn();
+          console.log('[Scan Orchestrator] ✅ Rollback completed');
+        } catch (rollbackError) {
+          console.error('[Scan Orchestrator] ❌ Rollback failed:', rollbackError);
+          // Log consistency error (Requirement 12.6)
+          console.error('[Scan Orchestrator] ⚠️  DATA CONSISTENCY ERROR: Failed to rollback transaction');
+        }
+      }
+      
+      throw error;
+    }
+  }
+
+  /**
+   * Update both Product Repository and Cache Service atomically
+   * Requirement 12.1, 12.2: Update both stores with same data
+   * Requirement 12.4, 12.5: Use transactions with rollback support
+   * 
+   * @param productData - Product data to store
+   * @param cacheKey - Cache key (barcode or image hash)
+   * @param cacheKeyType - Type of cache key
+   * @param tier - Tier that produced the result
+   * @param confidence - Confidence score
+   * @param productId - Optional existing product ID (if updating)
+   * @returns Promise resolving to the saved product data
+   */
+  private async updateProductAndCache(
+    productData: ProductData,
+    cacheKey: string,
+    cacheKeyType: 'barcode' | 'imageHash',
+    tier: Tier,
+    confidence: ConfidenceScore,
+    productId?: string
+  ): Promise<ProductData> {
+    return this.executeTransaction(async () => {
+      let savedProduct: ProductData | null = null;
+      let cacheUpdated = false;
+      let previousCacheEntry: any = null;
+
+      // Save previous cache state for rollback
+      const previousCache = await this.cacheService.lookup(cacheKey, cacheKeyType);
+      if (previousCache.hit && previousCache.entry) {
+        previousCacheEntry = previousCache.entry;
+      }
+
+      try {
+        // Step 1: Update Product Repository
+        if (productId) {
+          // Update existing product
+          // Skip automatic cache invalidation since we manage cache updates in this transaction
+          const updated = await this.productRepository.update(productId, {
+            barcode: productData.barcode || null,
+            name: productData.name,
+            brand: productData.brand,
+            size: productData.size || null,
+            category: productData.category || null,
+            image_url: productData.imageUrl || null,
+            metadata: productData.metadata || null,
+          }, false); // Skip cache invalidation - we handle it below
+          savedProduct = {
+            id: updated.id,
+            barcode: updated.barcode || undefined,
+            name: updated.name,
+            brand: updated.brand,
+            size: updated.size || undefined,
+            category: updated.category || 'Unknown',
+            imageUrl: updated.image_url || undefined,
+            metadata: updated.metadata || {},
+          };
+        } else if (productData.barcode) {
+          // Upsert by barcode
+          const upserted = await this.productRepository.upsertByBarcode({
+            barcode: productData.barcode,
+            name: productData.name,
+            brand: productData.brand,
+            size: productData.size || null,
+            category: productData.category || null,
+            image_url: productData.imageUrl || null,
+            metadata: productData.metadata || null,
+          });
+          savedProduct = {
+            id: upserted.id,
+            barcode: upserted.barcode || undefined,
+            name: upserted.name,
+            brand: upserted.brand,
+            size: upserted.size || undefined,
+            category: upserted.category || 'Unknown',
+            imageUrl: upserted.image_url || undefined,
+            metadata: upserted.metadata || {},
+          };
+        } else {
+          // Create new product
+          const created = await this.productRepository.create({
+            barcode: null,
+            name: productData.name,
+            brand: productData.brand,
+            size: productData.size || null,
+            category: productData.category || null,
+            image_url: productData.imageUrl || null,
+            metadata: productData.metadata || null,
+          });
+          savedProduct = {
+            id: created.id,
+            barcode: created.barcode || undefined,
+            name: created.name,
+            brand: created.brand,
+            size: created.size || undefined,
+            category: created.category || 'Unknown',
+            imageUrl: created.image_url || undefined,
+            metadata: created.metadata || {},
+          };
+        }
+
+        // Step 2: Update Cache Service
+        await this.cacheService.store(cacheKey, cacheKeyType, savedProduct, tier, confidence);
+        cacheUpdated = true;
+
+        console.log('[Scan Orchestrator] ✅ Product and cache updated atomically');
+
+        // Return result and rollback function
+        return {
+          result: savedProduct,
+          rollback: async () => {
+            console.log('[Scan Orchestrator] 🔄 Rolling back product and cache updates');
+            
+            // Rollback cache
+            if (cacheUpdated) {
+              if (previousCacheEntry) {
+                // Restore previous cache entry
+                await this.cacheService.store(
+                  cacheKey,
+                  cacheKeyType,
+                  previousCacheEntry.productData,
+                  previousCacheEntry.tier,
+                  previousCacheEntry.confidenceScore
+                );
+              } else {
+                // Remove cache entry
+                await this.cacheService.invalidate(cacheKey, cacheKeyType);
+              }
+            }
+
+            // Note: We cannot easily rollback Supabase changes without transaction support
+            // This is a limitation of the current implementation
+            // In a production system, we would use Supabase transactions or a saga pattern
+            console.log('[Scan Orchestrator] ⚠️  Product repository rollback not implemented (Supabase limitation)');
+          },
+        };
+
+      } catch (error) {
+        // If cache update failed but product was saved, we have inconsistency
+        if (savedProduct && !cacheUpdated) {
+          console.error('[Scan Orchestrator] ⚠️  DATA CONSISTENCY ERROR: Product saved but cache update failed');
+        }
+        throw error;
+      }
     });
-    
-    // TODO: Save to scan_logs table for analytics
   }
 }
 

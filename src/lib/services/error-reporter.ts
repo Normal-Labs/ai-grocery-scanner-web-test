@@ -91,39 +91,65 @@ export class ErrorReporterService {
   /**
    * Store error report to database
    * Requirement 5.2: Record error context
+   * Requirement 12.7: Use retry logic for database operations
    */
   private async storeErrorReport(report: ErrorReport): Promise<{ id: string }> {
     try {
-      // Store to Supabase error_reports table
+      // Store to Supabase error_reports table with retry logic
       const { getSupabaseClient } = require('../supabase/client');
       const supabase = getSupabaseClient();
 
-      const { data, error } = await supabase
-        .from('error_reports')
-        .insert({
-          user_id: report.userId,
-          session_id: report.sessionId,
-          product_id: report.incorrectProduct.id,
-          barcode: report.barcode,
-          image_hash: report.imageHash,
-          tier_used: report.tier,
-          user_feedback: report.userFeedback,
-          scan_context: {
-            productName: report.incorrectProduct.name,
-            brand: report.incorrectProduct.brand,
-            category: report.incorrectProduct.category,
-          },
-          created_at: report.timestamp.toISOString(),
-        })
-        .select('id')
-        .single();
+      // Use retry logic with exponential backoff
+      let lastError: Error | null = null;
+      const maxRetries = 3;
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const { data, error } = await supabase
+            .from('error_reports')
+            .insert({
+              user_id: report.userId,
+              session_id: report.sessionId,
+              product_id: report.incorrectProduct.id,
+              barcode: report.barcode,
+              image_hash: report.imageHash,
+              tier_used: report.tier,
+              user_feedback: report.userFeedback,
+              scan_context: {
+                productName: report.incorrectProduct.name,
+                brand: report.incorrectProduct.brand,
+                category: report.incorrectProduct.category,
+              },
+              created_at: report.timestamp.toISOString(),
+            })
+            .select('id')
+            .single();
 
-      if (error) {
-        throw new Error(`Failed to store error report: ${error.message}`);
+          if (error) {
+            throw new Error(`Failed to store error report: ${error.message}`);
+          }
+
+          if (attempt > 0) {
+            console.log(`[Error Reporter] ✅ Store succeeded on attempt ${attempt + 1}`);
+          }
+
+          console.log('[Error Reporter] 💾 Error report stored:', data.id);
+          return { id: data.id };
+          
+        } catch (error) {
+          lastError = error as Error;
+          
+          if (attempt < maxRetries) {
+            // Calculate exponential backoff delay (100ms, 200ms, 400ms)
+            const delay = Math.min(100 * Math.pow(2, attempt), 400);
+            console.log(`[Error Reporter] ⚠️  Store failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
       }
 
-      console.log('[Error Reporter] 💾 Error report stored:', data.id);
-      return { id: data.id };
+      console.error(`[Error Reporter] ❌ Store failed after ${maxRetries + 1} attempts`);
+      throw lastError || new Error('Failed to store error report');
 
     } catch (error) {
       console.error('[Error Reporter] ❌ Failed to store error report:', error);
@@ -134,6 +160,7 @@ export class ErrorReporterService {
   /**
    * Invalidate cache entries for incorrect identification
    * Requirement 5.3: Cache invalidation on error
+   * Requirement 12.3: Ensure consistency between Supabase and MongoDB
    */
   private async invalidateCacheEntries(report: ErrorReport): Promise<void> {
     try {
@@ -151,18 +178,25 @@ export class ErrorReporterService {
         invalidations.push(cacheService.invalidate(report.imageHash, 'imageHash'));
       }
 
+      // Invalidate all cache entries for the incorrect product
+      // This ensures consistency across all cache keys (barcode and imageHash)
+      console.log('[Error Reporter] 🗑️  Invalidating all cache entries for product:', report.incorrectProduct.id);
+      invalidations.push(cacheService.invalidateByProductId(report.incorrectProduct.id));
+
       await Promise.all(invalidations);
       console.log('[Error Reporter] ✅ Cache invalidated');
 
     } catch (error) {
       console.error('[Error Reporter] ⚠️  Failed to invalidate cache:', error);
       // Don't throw - cache invalidation failure shouldn't block error reporting
+      console.error('[Error Reporter] ⚠️  DATA CONSISTENCY WARNING: Cache may be stale');
     }
   }
 
   /**
    * Flag product for manual review
    * Requirement 5.4: Product flagging on error
+   * Requirement 12.7: Use retry logic for database operations
    */
   private async flagProductForReview(productId: string): Promise<void> {
     try {
@@ -171,16 +205,43 @@ export class ErrorReporterService {
       const { getSupabaseClient } = require('../supabase/client');
       const supabase = getSupabaseClient();
 
-      const { error } = await supabase
-        .from('products')
-        .update({ flagged_for_review: true })
-        .eq('id', productId);
+      // Use retry logic with exponential backoff
+      let lastError: Error | null = null;
+      const maxRetries = 3;
+      
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const { error } = await supabase
+            .from('products')
+            .update({ flagged_for_review: true })
+            .eq('id', productId);
 
-      if (error) {
-        throw new Error(`Failed to flag product: ${error.message}`);
+          if (error) {
+            throw new Error(`Failed to flag product: ${error.message}`);
+          }
+
+          if (attempt > 0) {
+            console.log(`[Error Reporter] ✅ Flag succeeded on attempt ${attempt + 1}`);
+          }
+
+          console.log('[Error Reporter] ✅ Product flagged for review');
+          return;
+          
+        } catch (error) {
+          lastError = error as Error;
+          
+          if (attempt < maxRetries) {
+            // Calculate exponential backoff delay (100ms, 200ms, 400ms)
+            const delay = Math.min(100 * Math.pow(2, attempt), 400);
+            console.log(`[Error Reporter] ⚠️  Flag failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+            await new Promise(resolve => setTimeout(resolve, delay));
+          }
+        }
       }
 
-      console.log('[Error Reporter] ✅ Product flagged for review');
+      console.error(`[Error Reporter] ❌ Flag failed after ${maxRetries + 1} attempts`);
+      console.error('[Error Reporter] ⚠️  Failed to flag product:', lastError);
+      // Don't throw - flagging failure shouldn't block error reporting
 
     } catch (error) {
       console.error('[Error Reporter] ⚠️  Failed to flag product:', error);

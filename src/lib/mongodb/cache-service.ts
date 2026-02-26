@@ -233,6 +233,55 @@ export class CacheService {
       throw error;
     }
   }
+
+  /**
+   * Get a snapshot of a cache entry for rollback purposes
+   * Requirement 12.5: Support rollback operations
+   * 
+   * @param key - Barcode or image hash
+   * @param keyType - Type of key
+   * @returns Cache entry snapshot or null if not found
+   */
+  async getSnapshot(key: string, keyType: CacheKeyType): Promise<CacheEntryDocument | null> {
+    try {
+      const db = await getMongoClient();
+      const collection = db.collection<CacheEntryDocument>(this.collectionName);
+
+      const entry = await collection.findOne({
+        key,
+        keyType,
+      });
+
+      return entry;
+    } catch (error) {
+      console.error('[Cache Service] Get snapshot error:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Restore a cache entry from a snapshot
+   * Requirement 12.5: Support rollback operations
+   * 
+   * @param snapshot - Cache entry snapshot to restore
+   */
+  async restoreSnapshot(snapshot: CacheEntryDocument): Promise<void> {
+    try {
+      const db = await getMongoClient();
+      const collection = db.collection<CacheEntryDocument>(this.collectionName);
+
+      await collection.updateOne(
+        { key: snapshot.key, keyType: snapshot.keyType },
+        { $set: snapshot },
+        { upsert: true }
+      );
+
+      console.log(`[Cache Service] 🔄 Restored snapshot: ${snapshot.keyType}=${snapshot.key.substring(0, 16)}...`);
+    } catch (error) {
+      console.error('[Cache Service] Restore snapshot error:', error);
+      throw error;
+    }
+  }
 }
 
 // Export singleton instance

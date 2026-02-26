@@ -203,45 +203,139 @@ export class DiscoveryService {
   }
 
   /**
-   * Persist discovered barcode to database and cache
+   * Persist discovered barcode to database and cache with transaction support
+   * Requirement 12.4, 12.5: Use transactions with rollback
+   * Requirement 12.7: Use retry logic for database operations
    */
   private async persistDiscoveredBarcode(
     productData: ProductData,
     imageHash?: string
   ): Promise<void> {
-    try {
-      // Save to database (upsert by barcode)
-      const savedProduct = await productRepositoryMultiTier.upsertByBarcode(productData);
-      productData.id = savedProduct.id;
+    let savedProduct: any = null;
+    let barcodeCached = false;
+    let imageHashCached = false;
+    let previousBarcodeCache: any = null;
+    let previousImageHashCache: any = null;
 
-      console.log(`[Discovery Service] 💾 Saved product: ${savedProduct.id}`);
+    // Use retry logic with exponential backoff
+    let lastError: Error | null = null;
+    const maxRetries = 3;
+    
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        // Save previous cache states for rollback
+        if (productData.barcode) {
+          const prevBarcode = await cacheService.lookup(productData.barcode, 'barcode');
+          if (prevBarcode.hit && prevBarcode.entry) {
+            previousBarcodeCache = prevBarcode.entry;
+          }
+        }
+        
+        if (imageHash) {
+          const prevImageHash = await cacheService.lookup(imageHash, 'imageHash');
+          if (prevImageHash.hit && prevImageHash.entry) {
+            previousImageHashCache = prevImageHash.entry;
+          }
+        }
 
-      // Update cache with barcode
-      await cacheService.store(
-        productData.barcode,
-        'barcode',
-        productData,
-        3, // tier 3
-        productData.metadata?.confidence || 0.7
-      );
+        // Step 1: Save to database (upsert by barcode)
+        savedProduct = await productRepositoryMultiTier.upsertByBarcode(productData);
+        productData.id = savedProduct.id;
 
-      // Also cache by image hash if available
-      if (imageHash) {
+        console.log(`[Discovery Service] 💾 Saved product: ${savedProduct.id}`);
+
+        // Step 2: Update cache with barcode
         await cacheService.store(
-          imageHash,
-          'imageHash',
+          productData.barcode,
+          'barcode',
           productData,
-          3,
+          3, // tier 3
           productData.metadata?.confidence || 0.7
         );
+        barcodeCached = true;
+
+        // Step 3: Also cache by image hash if available
+        if (imageHash) {
+          await cacheService.store(
+            imageHash,
+            'imageHash',
+            productData,
+            3,
+            productData.metadata?.confidence || 0.7
+          );
+          imageHashCached = true;
+        }
+
+        if (attempt > 0) {
+          console.log(`[Discovery Service] ✅ Persist succeeded on attempt ${attempt + 1}`);
+        }
+
+        console.log('[Discovery Service] ✅ Cache updated');
+        return; // Success!
+
+      } catch (error) {
+        lastError = error as Error;
+        console.error('[Discovery Service] ❌ Failed to persist:', error);
+        
+        // Rollback cache updates if they succeeded
+        console.log('[Discovery Service] 🔄 Rolling back cache updates');
+        
+        try {
+          if (barcodeCached) {
+            if (previousBarcodeCache) {
+              // Restore previous cache entry
+              await cacheService.store(
+                productData.barcode,
+                'barcode',
+                previousBarcodeCache.productData,
+                previousBarcodeCache.tier,
+                previousBarcodeCache.confidenceScore
+              );
+            } else {
+              // Remove cache entry
+              await cacheService.invalidate(productData.barcode, 'barcode');
+            }
+          }
+          
+          if (imageHashCached && imageHash) {
+            if (previousImageHashCache) {
+              // Restore previous cache entry
+              await cacheService.store(
+                imageHash,
+                'imageHash',
+                previousImageHashCache.productData,
+                previousImageHashCache.tier,
+                previousImageHashCache.confidenceScore
+              );
+            } else {
+              // Remove cache entry
+              await cacheService.invalidate(imageHash, 'imageHash');
+            }
+          }
+          
+          console.log('[Discovery Service] ✅ Rollback completed');
+        } catch (rollbackError) {
+          console.error('[Discovery Service] ❌ Rollback failed:', rollbackError);
+          console.error('[Discovery Service] ⚠️  DATA CONSISTENCY ERROR: Failed to rollback cache updates');
+        }
+        
+        // Retry logic
+        if (attempt < maxRetries) {
+          // Calculate exponential backoff delay (100ms, 200ms, 400ms)
+          const delay = Math.min(100 * Math.pow(2, attempt), 400);
+          console.log(`[Discovery Service] ⚠️  Persist failed, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          
+          // Reset state for retry
+          savedProduct = null;
+          barcodeCached = false;
+          imageHashCached = false;
+        }
       }
-
-      console.log('[Discovery Service] ✅ Cache updated');
-
-    } catch (error) {
-      console.error('[Discovery Service] ❌ Failed to persist:', error);
-      throw error;
     }
+
+    console.error(`[Discovery Service] ❌ Persist failed after ${maxRetries + 1} attempts`);
+    throw lastError || new Error('Failed to persist discovered barcode');
   }
 }
 
