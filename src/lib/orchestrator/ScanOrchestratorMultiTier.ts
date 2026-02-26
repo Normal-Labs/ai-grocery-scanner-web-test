@@ -250,7 +250,7 @@ export class ScanOrchestratorMultiTier {
           await new Promise(resolve => setTimeout(resolve, 10000));
         }
         
-        const tier4Result = await this.attemptTier4(request.image, request.imageHash);
+        const tier4Result = await this.attemptTier4(request.image, request.imageHash, request.barcode);
         if (tier4Result) {
           const processingTimeMs = Date.now() - startTime;
           console.log(`[Scan Orchestrator] ✅ Tier 4 success (${processingTimeMs}ms)`);
@@ -538,11 +538,13 @@ export class ScanOrchestratorMultiTier {
    * 
    * @param image - Product image
    * @param imageHash - Image hash (optional)
+   * @param barcode - Product barcode (optional)
    * @returns Product data and confidence, or null if confidence too low
    */
   private async attemptTier4(
     image: ImageData,
-    imageHash?: string
+    imageHash?: string,
+    barcode?: string
   ): Promise<{ product: ProductData; confidence: ConfidenceScore } | null> {
     console.log('[Scan Orchestrator] 🤖 Tier 4: Analyzing image with AI...');
     
@@ -577,6 +579,7 @@ export class ScanOrchestratorMultiTier {
     // Create or find product in database
     const productData: ProductData = {
       id: '', // Will be set after database insert
+      barcode: barcode, // Include barcode from scan request
       name: analysisResult.metadata.productName || 'Unknown Product',
       brand: analysisResult.metadata.brandName || 'Unknown Brand',
       size: analysisResult.metadata.size,

@@ -54,7 +54,7 @@ USING GIN (to_tsvector('english', name || ' ' || brand || ' ' || COALESCE(size, 
 CREATE TABLE error_reports (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   scan_id VARCHAR(100),
-  user_id UUID NOT NULL,
+  user_id VARCHAR(100) NOT NULL,
   incorrect_product_id UUID REFERENCES products(id),
   actual_product_name VARCHAR(255),
   actual_product_brand VARCHAR(255),
@@ -81,7 +81,7 @@ CREATE INDEX idx_error_reports_created_at ON error_reports(created_at);
 
 CREATE TABLE scan_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID NOT NULL,
+  user_id VARCHAR(100) NOT NULL,
   session_id VARCHAR(100) NOT NULL,
   tier INTEGER NOT NULL,
   success BOOLEAN NOT NULL,
@@ -145,20 +145,20 @@ CREATE POLICY "Authenticated users can update products"
 -- Error Reports: Users can only access their own reports
 CREATE POLICY "Users can read their own error reports"
   ON error_reports FOR SELECT
-  USING (auth.uid() = user_id);
+  USING (auth.uid()::TEXT = user_id);
 
 CREATE POLICY "Users can insert their own error reports"
   ON error_reports FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (auth.uid()::TEXT = user_id);
 
 -- Scan Logs: Users can only access their own logs
 CREATE POLICY "Users can read their own scan logs"
   ON scan_logs FOR SELECT
-  USING (auth.uid() = user_id);
+  USING (auth.uid()::TEXT = user_id);
 
 CREATE POLICY "Users can insert their own scan logs"
   ON scan_logs FOR INSERT
-  WITH CHECK (auth.uid() = user_id);
+  WITH CHECK (auth.uid()::TEXT = user_id);
 
 -- ============================================================================
 -- HELPER FUNCTIONS
@@ -258,8 +258,8 @@ BEGIN
   FROM products p
   WHERE 
     p.name ILIKE '%' || p_name || '%'
-    AND (p_brand IS NULL OR p.brand ILIKE '%' || COALESCE(p_brand, '') || '%')
-    AND (p_size IS NULL OR p.size ILIKE '%' || COALESCE(p_size, '') || '%')
+    AND (p_brand IS NULL OR COALESCE(p_brand, '') = '' OR p.brand ILIKE '%' || p_brand || '%')
+    AND (p_size IS NULL OR COALESCE(p_size, '') = '' OR p.size ILIKE '%' || p_size || '%')
   ORDER BY similarity_score DESC
   LIMIT 10;
 END;
@@ -267,7 +267,7 @@ $$ LANGUAGE plpgsql;
 
 -- Function to record scan log
 CREATE OR REPLACE FUNCTION record_scan_log(
-  p_user_id UUID,
+  p_user_id VARCHAR(100),
   p_session_id VARCHAR(100),
   p_tier INTEGER,
   p_success BOOLEAN,

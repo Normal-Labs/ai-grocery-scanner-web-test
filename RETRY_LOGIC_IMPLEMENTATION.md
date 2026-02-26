@@ -1,5 +1,7 @@
 # Retry Logic Implementation
 
+> **Note**: This is a detailed technical implementation document. For system overview, see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
 ## Overview
 
 This document describes the retry logic implementation for database operations in the multi-tier product identification system, fulfilling **Requirement 12.7**.

@@ -1,5 +1,7 @@
 # Cache Invalidation Implementation Summary
 
+> **Note**: This is a detailed technical implementation document. For system overview, see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
 ## Task 11.2: Implement cache invalidation across stores
 
 ### Requirements Addressed

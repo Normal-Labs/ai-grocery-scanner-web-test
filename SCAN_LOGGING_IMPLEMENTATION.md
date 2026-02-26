@@ -1,5 +1,7 @@
 # Scan Logging Implementation - Task 15.1
 
+> **Note**: This is a detailed technical implementation document. For system overview, see [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+
 ## Summary
 
 Implemented database logging for the Scan Orchestrator to track tier usage, success rates, processing times, cache hits/misses, and error rates.
