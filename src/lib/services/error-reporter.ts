@@ -183,6 +183,16 @@ export class ErrorReporterService {
       console.log('[Error Reporter] 🗑️  Invalidating all cache entries for product:', report.incorrectProduct.id);
       invalidations.push(cacheService.invalidateByProductId(report.incorrectProduct.id));
 
+      // Requirement 13.2: Invalidate dimension cache on error reports
+      try {
+        const { dimensionCacheService } = await import('@/lib/cache/DimensionCacheService');
+        console.log('[Error Reporter] 🗑️  Invalidating dimension cache for product:', report.incorrectProduct.id);
+        invalidations.push(dimensionCacheService.invalidate(report.incorrectProduct.id));
+      } catch (dimError) {
+        console.error('[Error Reporter] ⚠️  Failed to invalidate dimension cache:', dimError);
+        // Best-effort invalidation - don't throw
+      }
+
       await Promise.all(invalidations);
       console.log('[Error Reporter] ✅ Cache invalidated');
 

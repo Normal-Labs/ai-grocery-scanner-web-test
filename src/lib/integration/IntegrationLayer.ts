@@ -21,6 +21,10 @@ import {
   UserTier,
   DimensionStatus,
 } from '@/lib/types/dimension-analysis';
+import {
+  logDimensionMetrics,
+  calculateDimensionAnalysisCost,
+} from '@/lib/services/dimension-metrics';
 
 /**
  * Integration Layer class
@@ -91,6 +95,19 @@ export class IntegrationLayer {
 
       if (!dimensionResult.success || !dimensionResult.analysis) {
         // Graceful degradation (Requirement 11.1)
+        
+        // Log error metrics (Requirement 14.5)
+        await logDimensionMetrics({
+          productId: identificationResult.product.id,
+          userId: request.userId,
+          userTier,
+          cached: false,
+          processingTimeMs: dimensionResult.processingTimeMs,
+          success: false,
+          errorCode: dimensionResult.error?.code,
+          apiCost: 0,
+        });
+
         return {
           ...identificationResult,
           dimensionStatus: 'failed' as DimensionStatus,
@@ -110,6 +127,32 @@ export class IntegrationLayer {
       // Apply tier-based filtering (Requirements 5.1, 5.2, 5.4)
       const filteredAnalysis = this.filterByTier(dimensionResult.analysis, userTier);
 
+      // Performance monitoring (Requirements 6.1, 6.2, 6.3, 6.4)
+      const totalTime = Date.now() - startTime;
+      const dimensionTime = dimensionResult.processingTimeMs;
+      
+      // Alert if cached responses exceed 5 seconds (Requirement 6.4)
+      if (dimensionResult.cached && dimensionTime > 5000) {
+        console.warn(`[Integration Layer] ⚠️  PERFORMANCE: Cached dimension analysis took ${dimensionTime}ms (target: <5s)`);
+      }
+      
+      // Alert if fresh analysis exceeds 12 seconds (Requirement 6.3)
+      if (!dimensionResult.cached && dimensionTime > 12000) {
+        console.warn(`[Integration Layer] ⚠️  PERFORMANCE: Fresh dimension analysis took ${dimensionTime}ms (target: <12s)`);
+      }
+
+      // Log metrics (Requirements 7.5, 7.6, 14.1, 14.2, 14.3, 14.4, 14.5)
+      await logDimensionMetrics({
+        productId: identificationResult.product.id,
+        userId: request.userId,
+        userTier,
+        cached: dimensionResult.cached,
+        processingTimeMs: dimensionResult.processingTimeMs,
+        success: true,
+        apiCost: calculateDimensionAnalysisCost(dimensionResult.cached),
+        dimensionsViewed: this.getAvailableDimensions(userTier),
+      });
+
       return {
         ...identificationResult,
         dimensionAnalysis: filteredAnalysis,
@@ -126,6 +169,18 @@ export class IntegrationLayer {
       // Graceful degradation: return product info even if dimension analysis fails
       // Requirement 11.1, 11.7
       console.error('[Integration Layer] Dimension analysis failed:', error);
+
+      // Log error metrics (Requirement 14.5)
+      await logDimensionMetrics({
+        productId: identificationResult.product!.id,
+        userId: request.userId,
+        userTier,
+        cached: false,
+        processingTimeMs: Date.now() - startTime,
+        success: false,
+        errorCode: 'DIMENSION_ANALYSIS_EXCEPTION',
+        apiCost: 0,
+      });
 
       return {
         ...identificationResult,

@@ -386,6 +386,16 @@ export class ProductRepositoryMultiTier {
       // This will remove all cache entries (by barcode and imageHash) for this product
       await cacheService.invalidateByProductId(productId);
       
+      // Requirement 13.1: Invalidate dimension cache on product updates
+      try {
+        const { dimensionCacheService } = await import('@/lib/cache/DimensionCacheService');
+        await dimensionCacheService.invalidate(productId);
+        console.log(`[Product Repository] ✅ Dimension cache invalidated for product: ${productId}`);
+      } catch (dimError) {
+        console.error('[Product Repository] ⚠️  Failed to invalidate dimension cache:', dimError);
+        // Best-effort invalidation - don't throw
+      }
+      
       console.log(`[Product Repository] ✅ Cache invalidated for product: ${productId}`);
     } catch (error) {
       console.error('[Product Repository] ⚠️  Failed to invalidate cache:', error);

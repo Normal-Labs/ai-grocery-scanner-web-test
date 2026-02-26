@@ -170,6 +170,44 @@ export async function POST(request: NextRequest) {
 
     const totalTime = Date.now() - startTime;
 
+    // Requirement 6.7: Update scan log with dimension analysis fields
+    if (result.success && result.product) {
+      try {
+        const { getSupabaseServerClient } = await import('@/lib/supabase/server-client');
+        const supabase = getSupabaseServerClient();
+        
+        // Find the most recent scan log for this session and product
+        const { data: scanLog } = await supabase
+          .from('scan_logs')
+          .select('id')
+          .eq('session_id', sessionId)
+          .eq('product_id', result.product.id)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (scanLog) {
+          // Update with dimension analysis fields
+          await supabase
+            .from('scan_logs')
+            .update({
+              dimension_analysis_cached: result.dimensionCached || false,
+              dimension_analysis_time_ms: result.dimensionAnalysis 
+                ? (totalTime - result.processingTimeMs) 
+                : null,
+              dimension_analysis_status: result.dimensionStatus,
+              user_tier: result.userTier,
+            })
+            .eq('id', scanLog.id);
+
+          console.log('[Scan API Multi-Tier] ✅ Updated scan log with dimension fields');
+        }
+      } catch (logError) {
+        // Don't throw - logging failures shouldn't block the response
+        console.error('[Scan API Multi-Tier] ⚠️  Failed to update scan log:', logError);
+      }
+    }
+
     console.log('[Scan API Multi-Tier] ✅ Scan complete:', {
       success: result.success,
       tier: result.tier,

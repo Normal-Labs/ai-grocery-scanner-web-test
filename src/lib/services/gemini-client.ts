@@ -12,6 +12,67 @@ import { google } from '@ai-sdk/google';
 import { ImageData, ProductMetadata, VisualCharacteristics } from '@/lib/types/multi-tier';
 
 /**
+ * Circuit breaker states for API failure handling
+ * Requirement 11.2, 11.5: Circuit breaker for Gemini AI calls
+ */
+enum CircuitState {
+  CLOSED = 'CLOSED',     // Normal operation
+  OPEN = 'OPEN',         // Failing, reject requests
+  HALF_OPEN = 'HALF_OPEN' // Testing if service recovered
+}
+
+/**
+ * Circuit breaker for dimension analysis API failure handling
+ * Requirement 11.2: Open circuit after 5 consecutive failures
+ * Requirement 11.5: Half-open state after 60 seconds
+ */
+class DimensionAnalysisCircuitBreaker {
+  private state: CircuitState = CircuitState.CLOSED;
+  private failureCount: number = 0;
+  private lastFailureTime: number = 0;
+  private readonly failureThreshold: number = 5;
+  private readonly resetTimeout: number = 60000; // 60 seconds
+
+  recordSuccess(): void {
+    this.failureCount = 0;
+    this.state = CircuitState.CLOSED;
+  }
+
+  recordFailure(): void {
+    this.failureCount++;
+    this.lastFailureTime = Date.now();
+
+    if (this.failureCount >= this.failureThreshold) {
+      this.state = CircuitState.OPEN;
+      console.warn('[Dimension Analysis Circuit Breaker] Circuit opened due to failures');
+    }
+  }
+
+  canMakeRequest(): boolean {
+    if (this.state === CircuitState.CLOSED) {
+      return true;
+    }
+
+    if (this.state === CircuitState.OPEN) {
+      const timeSinceFailure = Date.now() - this.lastFailureTime;
+      if (timeSinceFailure >= this.resetTimeout) {
+        console.log('[Dimension Analysis Circuit Breaker] Attempting half-open state');
+        this.state = CircuitState.HALF_OPEN;
+        return true;
+      }
+      return false;
+    }
+
+    // HALF_OPEN state - allow one request to test
+    return true;
+  }
+
+  getState(): CircuitState {
+    return this.state;
+  }
+}
+
+/**
  * Gemini API Client class
  * 
  * Provides methods for OCR text extraction and comprehensive image analysis
@@ -20,6 +81,7 @@ import { ImageData, ProductMetadata, VisualCharacteristics } from '@/lib/types/m
 export class GeminiClient {
   private apiKey: string;
   private model: string = 'gemini-2.0-flash'; // Same model as working /api/analyze endpoint
+  private dimensionCircuitBreaker: DimensionAnalysisCircuitBreaker;
 
   constructor(apiKey?: string) {
     this.apiKey = apiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY || '';
@@ -30,6 +92,9 @@ export class GeminiClient {
     
     // Set API key for @ai-sdk/google
     process.env.GOOGLE_GENERATIVE_AI_API_KEY = this.apiKey;
+    
+    // Initialize circuit breaker for dimension analysis
+    this.dimensionCircuitBreaker = new DimensionAnalysisCircuitBreaker();
   }
 
   /**
@@ -199,6 +264,11 @@ Return ONLY the JSON object, no additional text.`
     const startTime = Date.now();
 
     try {
+      // Check circuit breaker (Requirement 11.2, 11.5)
+      if (!this.dimensionCircuitBreaker.canMakeRequest()) {
+        throw new Error('Dimension analysis circuit breaker is open - too many recent failures');
+      }
+
       console.log('[Gemini Client] 🎯 Analyzing product dimensions...');
 
       const imageDataUrl = `data:${image.mimeType};base64,${image.base64}`;
@@ -229,10 +299,17 @@ Return ONLY the JSON object, no additional text.`
       const duration = Date.now() - startTime;
       console.log(`[Gemini Client] ✅ Dimensions analyzed (${duration}ms)`);
 
+      // Record success for circuit breaker
+      this.dimensionCircuitBreaker.recordSuccess();
+
       return result.text;
     } catch (error) {
       const duration = Date.now() - startTime;
       console.error(`[Gemini Client] ❌ Dimension analysis failed (${duration}ms):`, error);
+      
+      // Record failure for circuit breaker
+      this.dimensionCircuitBreaker.recordFailure();
+      
       throw error;
     }
   }

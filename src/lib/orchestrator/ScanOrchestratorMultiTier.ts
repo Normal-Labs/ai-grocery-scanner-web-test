@@ -596,7 +596,10 @@ export class ScanOrchestratorMultiTier {
       return await this.productRepository.searchByMetadata(analysisResult.metadata);
     });
     
-    if (searchResults.length > 0) {
+    // Use existing product if similarity score is high enough (>= 0.6)
+    const MIN_SIMILARITY_THRESHOLD = 0.6;
+    
+    if (searchResults.length > 0 && searchResults[0].similarity_score >= MIN_SIMILARITY_THRESHOLD) {
       // Use existing product - just cache it
       const existingProduct = searchResults[0];
       const existingProductData: ProductData = {
@@ -610,7 +613,8 @@ export class ScanOrchestratorMultiTier {
         metadata: existingProduct.metadata || {},
       };
       
-      console.log('[Scan Orchestrator] ✅ Tier 4: Matched to existing product');
+      console.log(`[Scan Orchestrator] ✅ Tier 4: Matched to existing product (similarity: ${searchResults[0].similarity_score.toFixed(2)})`);
+      console.log(`[Scan Orchestrator] 📦 Existing product: ${existingProduct.name} by ${existingProduct.brand}`);
       
       // Cache by image hash
       try {
@@ -633,6 +637,14 @@ export class ScanOrchestratorMultiTier {
       
       return { product: existingProductData, confidence: analysisResult.confidence };
     } else {
+      // No good match found - create new product
+      if (searchResults.length > 0) {
+        console.log(`[Scan Orchestrator] ⚠️  Tier 4: Found similar products but similarity too low (${searchResults[0].similarity_score.toFixed(2)} < ${MIN_SIMILARITY_THRESHOLD})`);
+        console.log(`[Scan Orchestrator] 💡 Creating new product to avoid false matches`);
+      } else {
+        console.log('[Scan Orchestrator] 💡 Tier 4: No similar products found, creating new product');
+      }
+      
       // Create new product with transactional update
       console.log('[Scan Orchestrator] 💾 Tier 4: Creating new product with transaction');
       

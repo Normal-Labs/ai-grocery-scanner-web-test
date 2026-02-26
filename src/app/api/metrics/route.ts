@@ -5,13 +5,14 @@
  * 
  * This endpoint provides aggregated metrics for monitoring system performance.
  * Returns tier usage statistics, success rates, processing times, cache hit rates,
- * and API usage tracking.
+ * API usage tracking, and dimension analysis metrics.
  * 
  * Requirements: 14.7
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseServerClient } from '@/lib/supabase/server-client';
+import { getAggregatedDimensionMetrics } from '@/lib/services/dimension-metrics';
 
 interface TierMetrics {
   totalScans: number;
@@ -43,6 +44,16 @@ interface MetricsResponse {
   };
   apiUsage: ApiUsage;
   overallMetrics: OverallMetrics;
+  dimensionMetrics?: {
+    totalAnalyses: number;
+    cacheHitRate: number;
+    avgProcessingTimeCached: number;
+    avgProcessingTimeFresh: number;
+    tierDistribution: { free: number; premium: number };
+    totalApiCost: number;
+    errorRate: number;
+    dimensionPopularity: { [dimension: string]: number };
+  };
 }
 
 /**
@@ -193,6 +204,15 @@ export async function GET(request: NextRequest) {
       cacheHitRate: totalScans > 0 ? cachedScans / totalScans : 0,
     };
 
+    // Fetch dimension analysis metrics (Requirement 14.7)
+    let dimensionMetrics;
+    try {
+      dimensionMetrics = await getAggregatedDimensionMetrics(startDate, endDate);
+    } catch (error) {
+      console.error('[Metrics API] ⚠️  Failed to fetch dimension metrics:', error);
+      // Continue without dimension metrics
+    }
+
     // Build response
     const response: MetricsResponse = {
       timeRange: {
@@ -202,6 +222,7 @@ export async function GET(request: NextRequest) {
       tierMetrics,
       apiUsage,
       overallMetrics,
+      dimensionMetrics,
     };
 
     console.log('[Metrics API] ✅ Metrics calculated successfully');

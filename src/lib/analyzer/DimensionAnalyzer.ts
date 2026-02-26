@@ -102,12 +102,25 @@ export class DimensionAnalyzer {
     productData: ProductData,
     image: ImageData
   ): Promise<DimensionAnalysisResult> {
-    // Call Gemini AI (Requirement 3.2)
-    const aiResponse = await this.geminiClient.analyzeDimensions(image, {
-      name: productData.name,
-      brand: productData.brand,
-      category: productData.category,
+    // Requirement 11.4: Set timeout for dimension analysis (10 seconds)
+    const DIMENSION_ANALYSIS_TIMEOUT = 10000;
+    
+    // Call Gemini AI with retry logic and timeout (Requirements 3.2, 11.4)
+    const aiResponsePromise = this.geminiClient.withRetry(
+      () => this.geminiClient.analyzeDimensions(image, {
+        name: productData.name,
+        brand: productData.brand,
+        category: productData.category,
+      }),
+      3 // Max 3 retries
+    );
+
+    // Add timeout wrapper
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error('Dimension analysis timeout')), DIMENSION_ANALYSIS_TIMEOUT);
     });
+
+    const aiResponse = await Promise.race([aiResponsePromise, timeoutPromise]);
 
     // Parse and validate response (Requirements 3.3, 3.4)
     const parsedResult = this.parseAIResponse(aiResponse);
