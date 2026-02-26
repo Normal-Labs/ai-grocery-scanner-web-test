@@ -1,194 +1,182 @@
-/**
- * Main Page Component - AI Grocery Scanner with Research Agent
- * 
- * Orchestrates the entire scanner workflow with tier-based access control.
- * Integrates TierContext, CameraCapture, ImagePreview, DimensionSelector,
- * ProgressTracker, ScanButton, and InsightsDisplay components.
- * 
- * Requirements: 1.5, 2.1, 2.4, 2.5, 3.1, 3.8, 7.1, 7.5, 7.6, 7.7, 8.1, 8.4, 8.7, 11.2, 11.5, 11.8, 12.1, 12.7
- */
-
 'use client';
 
-import { useState } from 'react';
-import { TierProvider, useTierContext } from '@/contexts/TierContext';
-import CameraCapture from '@/components/CameraCapture';
-import ImagePreview from '@/components/ImagePreview';
-import ScanButton from '@/components/ScanButton';
-import InsightsDisplay from '@/components/InsightsDisplay';
-import TierToggle from '@/components/TierToggle';
-import DimensionSelector from '@/components/DimensionSelector';
-import ProgressTracker from '@/components/ProgressTracker';
-import AuthGuard from '@/components/AuthGuard';
-import { useAnalysis } from '@/hooks/useAnalysis';
-import { useScan } from '@/hooks/useScan';
-import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
-import { getCurrentPosition } from '@/lib/geolocation';
-import type { AnalysisResult, SavedScan } from '@/lib/types';
-
 /**
- * Scanner state interface
+ * Product Scanning Page
+ * 
+ * Main user interface for scanning products using the multi-tier system.
+ * Integrates barcode detection with image-based fallback.
  */
-interface ScannerState {
-  capturedImage: string | null;
-  analysisResults: AnalysisResult | null;
-  isAnalyzing: boolean;
-  error: string | null;
+
+import { useState } from 'react';
+import BarcodeScanner from '@/components/BarcodeScanner';
+import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
+import type { SavedScan } from '@/lib/types';
+
+interface ScanResult {
+  success: boolean;
+  product?: {
+    id: string;
+    name: string;
+    brand: string;
+    barcode?: string;
+    size?: string;
+    category: string;
+    imageUrl?: string;
+  };
+  tier: number;
+  confidenceScore: number;
+  processingTimeMs: number;
+  cached: boolean;
+  warning?: string;
+  error?: {
+    code: string;
+    message: string;
+  };
+  // Dimension analysis fields
+  dimensionAnalysis?: {
+    dimensions: {
+      health: DimensionScore;
+      processing: DimensionScore;
+      allergens: DimensionScore;
+      responsiblyProduced: DimensionScore;
+      environmentalImpact: DimensionScore;
+    };
+    overallConfidence: number;
+  };
+  dimensionStatus?: 'completed' | 'processing' | 'failed' | 'skipped';
+  dimensionCached?: boolean;
+  userTier?: 'free' | 'premium';
+  availableDimensions?: string[];
+  upgradePrompt?: string;
 }
 
-/**
- * Main scanner component (wrapped with TierProvider)
- */
-function ScannerApp() {
-  // Access tier context
-  const {
-    tier,
-    setTier,
-    selectedDimension,
-    setSelectedDimension,
-    canUseToolCalling,
-  } = useTierContext();
+interface DimensionScore {
+  score: number;
+  explanation: string;
+  keyFactors: string[];
+  available: boolean;
+  locked: boolean;
+}
 
-  // Application state
-  const [state, setState] = useState<ScannerState>({
-    capturedImage: null,
-    analysisResults: null,
-    isAnalyzing: false,
-    error: null,
-  });
-
-  // History view state
+export default function ScanPage() {
+  const [scanning, setScanning] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<ScanResult | null>(null);
+  const [error, setError] = useState<string>('');
+  const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('free');
   const [showHistory, setShowHistory] = useState(false);
   const [history, setHistory] = useState<SavedScan[]>([]);
-  const [storageWarning, setStorageWarning] = useState<string | null>(null);
 
-  // Use new scan hook with cache-first architecture
-  const { scanProduct, error: scanError, fromCache } = useScan();
-  
-  // Keep old analysis hook for fallback (will be removed in future)
-  const { progressSteps } = useAnalysis();
-
-  /**
-   * Handle image capture from camera
-   */
-  const handleImageCapture = (imageData: string) => {
-    setState(prev => ({
-      ...prev,
-      capturedImage: imageData,
-      analysisResults: null,
-      isAnalyzing: false,
-      error: null,
-    }));
-  };
-
-  /**
-   * Handle scan button click - trigger scan with new cache-first API
-   * 
-   * Requirements: 9.1, 9.2, 9.3 - Capture geolocation when scan is initiated
-   */
-  const handleScan = async () => {
-    if (!state.capturedImage) return;
-
-    // Validate dimension selection for free tier
-    if (tier === 'free' && !selectedDimension) {
-      setState(prev => ({
-        ...prev,
-        error: 'Please select a dimension to analyze',
-      }));
-      return;
-    }
-
-    setState(prev => ({
-      ...prev,
-      isAnalyzing: true,
-      error: null,
-      analysisResults: null,
-    }));
+  const handleScanComplete = async (scanData: {
+    barcode?: string;
+    image?: string;
+    imageMimeType?: string;
+  }) => {
+    setLoading(true);
+    setError('');
+    setResult(null);
 
     try {
-      // Requirement 9.1: Request geolocation when scan is initiated
-      // Requirement 9.2: Capture coordinates if permission granted
-      // Requirement 9.3: Continue scan if permission denied
-      console.log('[Geolocation] Requesting user location...');
-      const locationResult = await getCurrentPosition();
-      
-      let location: { latitude: number; longitude: number } | undefined;
-      
-      if (locationResult.coordinates) {
-        location = locationResult.coordinates;
-        console.log('[Geolocation] Location captured:', location);
-      } else {
-        // Permission denied or unavailable - continue without location
-        console.log('[Geolocation] Location unavailable:', locationResult.error?.message);
-        location = undefined;
+      console.log('[Scan Page] 📤 Sending scan request:', {
+        hasBarcode: !!scanData.barcode,
+        hasImage: !!scanData.image,
+      });
+
+      // Prepare request body
+      const body: any = {
+        userId: 'user-' + Date.now(), // In production, use actual user ID
+        sessionId: 'session-' + Date.now(),
+        devUserTier, // Add tier toggle
+      };
+
+      if (scanData.barcode) {
+        body.barcode = scanData.barcode;
       }
 
-      // Call new scan API with cache-first architecture
-      const results = await scanProduct({
-        imageData: state.capturedImage,
-        tier,
-        dimension: selectedDimension || undefined,
-        location,
-      });
-      
-      // Log data source to console
-      console.log('[Data Source]', {
-        source: fromCache ? 'MongoDB Cache' : 'Fresh AI Analysis (Gemini 2.0 Flash)',
-        fromCache,
-        productName: results.products[0]?.productName,
-        timestamp: new Date().toISOString(),
-        tier,
-        dimension: selectedDimension || 'all',
-      });
-      
-      setState(prev => ({
-        ...prev,
-        analysisResults: results,
-        isAnalyzing: false,
-        error: null,
-      }));
+      if (scanData.image) {
+        body.image = scanData.image;
+        body.imageMimeType = scanData.imageMimeType || 'image/jpeg';
+      }
 
-      // Save to localStorage after successful scan
-      try {
-        saveAnalysis(state.capturedImage, results);
-      } catch (storageError) {
-        console.warn('Failed to save to localStorage:', storageError);
-        setStorageWarning('Unable to save scan history. Your browser storage may be full.');
+      // Call multi-tier scan API
+      const response = await fetch('/api/scan-multi-tier', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+      console.log('[Scan Page] 📥 Scan result:', data);
+
+      setResult(data);
+
+      if (!data.success) {
+        setError(data.error?.message || 'Scan failed');
+      } else if (data.success && data.product) {
+        // Save successful scan to history
+        try {
+          // Convert scan result to AnalysisResult format for storage
+          const analysisResult = {
+            products: [{
+              productName: data.product.name,
+              brand: data.product.brand,
+              category: data.product.category,
+              barcode: data.product.barcode,
+              size: data.product.size,
+              confidence: data.confidenceScore,
+              dimensions: data.dimensionAnalysis?.dimensions || {},
+            }],
+            metadata: {
+              tier: data.tier,
+              cached: data.cached,
+              processingTimeMs: data.processingTimeMs,
+            },
+          };
+          
+          if (scanData.image) {
+            saveAnalysis(scanData.image, analysisResult as any);
+          }
+        } catch (storageError) {
+          console.warn('Failed to save to localStorage:', storageError);
+        }
       }
     } catch (err) {
-      setState(prev => ({
-        ...prev,
-        isAnalyzing: false,
-        error: scanError || 'Failed to scan product. Please try again.',
-      }));
+      console.error('[Scan Page] ❌ Scan error:', err);
+      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
+      setError(errorMessage);
+    } finally {
+      setLoading(false);
+      setScanning(false);
     }
   };
 
-  /**
-   * Handle retake button click - clear image and restart
-   */
-  const handleRetake = () => {
-    setState({
-      capturedImage: null,
-      analysisResults: null,
-      isAnalyzing: false,
-      error: null,
-    });
+  const handleScanError = (errorMessage: string) => {
+    setError(errorMessage);
+    setScanning(false);
   };
 
-  /**
-   * Handle clear error button click
-   */
-  const handleClearError = () => {
-    setState(prev => ({
-      ...prev,
-      error: null,
-    }));
+  const getTierName = (tier: number) => {
+    switch (tier) {
+      case 1: return 'Direct Barcode';
+      case 2: return 'Visual Text';
+      case 3: return 'Discovery';
+      case 4: return 'AI Analysis';
+      default: return 'Unknown';
+    }
   };
 
-  /**
-   * Handle view history button click
-   */
+  const getTierColor = (tier: number) => {
+    switch (tier) {
+      case 1: return 'bg-green-500';
+      case 2: return 'bg-blue-500';
+      case 3: return 'bg-yellow-500';
+      case 4: return 'bg-purple-500';
+      default: return 'bg-gray-500';
+    }
+  };
+
   const handleViewHistory = () => {
     try {
       const recentScans = getRecentAnalyses();
@@ -196,353 +184,503 @@ function ScannerApp() {
       setShowHistory(true);
     } catch (err) {
       console.error('Failed to load history:', err);
-      setStorageWarning('Unable to load scan history.');
+      setError('Unable to load scan history.');
     }
   };
 
-  /**
-   * Handle clear history button click
-   */
   const handleClearHistory = () => {
     try {
       clearHistory();
       setHistory([]);
-      setStorageWarning(null);
     } catch (err) {
       console.error('Failed to clear history:', err);
-      setStorageWarning('Unable to clear scan history.');
+      setError('Unable to clear scan history.');
     }
   };
 
-  /**
-   * Handle close history view
-   */
   const handleCloseHistory = () => {
     setShowHistory(false);
   };
 
-  /**
-   * Handle loading a scan from history
-   */
   const handleLoadHistoryScan = (scan: SavedScan) => {
-    setState({
-      capturedImage: scan.imageData,
-      analysisResults: scan.results,
-      isAnalyzing: false,
-      error: null,
-    });
-    setShowHistory(false);
+    // Convert SavedScan back to ScanResult format
+    const product = scan.results.products[0];
+    if (product) {
+      const scanResult: ScanResult = {
+        success: true,
+        product: {
+          id: product.barcode || 'unknown',
+          name: product.productName,
+          brand: product.brand || 'Unknown',
+          barcode: product.barcode,
+          size: product.size,
+          category: product.category || 'Unknown',
+        },
+        tier: (scan.results.metadata as any)?.tier || 4,
+        confidenceScore: product.confidence || 0.9,
+        processingTimeMs: (scan.results.metadata as any)?.processingTimeMs || 0,
+        cached: (scan.results.metadata as any)?.cached || false,
+        // Add dimension analysis if available
+        dimensionAnalysis: product.dimensions ? {
+          dimensions: product.dimensions as any,
+          overallConfidence: 0.9,
+        } : undefined,
+        dimensionStatus: product.dimensions ? 'completed' : 'skipped',
+        dimensionCached: true,
+      };
+      setResult(scanResult);
+      setShowHistory(false);
+    }
   };
 
-  // Check if scan button should be enabled
-  const canScan = state.capturedImage && !state.isAnalyzing && 
-    (tier === 'premium' || (tier === 'free' && selectedDimension));
-
   return (
-    <div className="min-h-screen bg-gradient-to-b from-blue-50 to-white">
+    <div className="min-h-screen bg-gray-50">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
-        <div className="max-w-2xl mx-auto px-4 py-4">
-          <h1 className="text-2xl font-bold text-gray-800 text-center">
-            🛒 AI Grocery Scanner
-          </h1>
-          <p className="text-sm text-gray-600 text-center mt-1">
-            {canUseToolCalling 
-              ? 'Research Agent with web search & content extraction'
-              : 'Scan products for health, sustainability, and allergen insights'}
-          </p>
-        </div>
-      </header>
-
-      {/* Main Content - Protected by AuthGuard */}
-      <AuthGuard>
-        <main className="max-w-2xl mx-auto px-4 py-6 pb-24">
-        {/* Developer Sandbox - Tier Toggle */}
-        <div className="mb-6">
-          <TierToggle currentTier={tier} onTierChange={setTier} />
-        </div>
-
-        {/* Storage Warning */}
-        {storageWarning && (
-          <div
-            className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-500 rounded-lg"
-            role="alert"
-          >
-            <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0" role="img" aria-label="warning">
-                ⚠️
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-4xl mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">🛒 AI Grocery Scanner</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                Product Research Agent
+              </p>
+            </div>
+            
+            {/* Tier Toggle */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-gray-600">Dev Mode:</span>
+              <button
+                onClick={() => setDevUserTier(devUserTier === 'free' ? 'premium' : 'free')}
+                className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors ${
+                  devUserTier === 'premium' ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
+                    devUserTier === 'premium' ? 'translate-x-9' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className={`text-sm font-semibold ${
+                devUserTier === 'premium' ? 'text-blue-600' : 'text-gray-600'
+              }`}>
+                {devUserTier === 'premium' ? '💎 Premium' : '📋 Free'}
               </span>
-              <div className="flex-1">
-                <p className="text-sm text-yellow-800">{storageWarning}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="max-w-4xl mx-auto px-4 py-6">
+        {/* History View */}
+        {showHistory ? (
+          <div className="space-y-4">
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-xl font-bold text-gray-800">Scan History</h2>
                 <button
-                  onClick={() => setStorageWarning(null)}
-                  className="text-sm text-yellow-900 underline mt-1"
+                  onClick={handleCloseHistory}
+                  className="text-blue-600 hover:text-blue-700 font-medium"
                 >
-                  Dismiss
+                  Close
                 </button>
               </div>
+
+              {history.length === 0 ? (
+                <div className="text-center py-8 px-4 bg-gray-50 rounded-lg">
+                  <p className="text-gray-600">No scan history yet</p>
+                  <p className="text-sm text-gray-500 mt-1">
+                    Your scanned products will appear here
+                  </p>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {history.map((scan, index) => {
+                      const product = scan.results.products[0];
+                      return (
+                        <div
+                          key={scan.timestamp}
+                          className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-blue-300 transition-colors"
+                        >
+                          <div className="flex gap-4">
+                            <img
+                              src={scan.imageData}
+                              alt={`Scan ${index + 1}`}
+                              className="w-20 h-20 object-cover rounded"
+                            />
+                            <div className="flex-1">
+                              <p className="text-sm text-gray-500">
+                                {new Date(scan.timestamp).toLocaleString()}
+                              </p>
+                              {product && (
+                                <>
+                                  <p className="text-base font-semibold text-gray-900 mt-1">
+                                    {product.productName}
+                                  </p>
+                                  <p className="text-sm text-gray-600">
+                                    {product.brand || 'Unknown Brand'}
+                                  </p>
+                                </>
+                              )}
+                              <button
+                                onClick={() => handleLoadHistoryScan(scan)}
+                                className="text-sm text-blue-600 hover:text-blue-700 font-medium mt-2"
+                              >
+                                View Results
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    onClick={handleClearHistory}
+                    className="w-full mt-4 px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors"
+                  >
+                    Clear All History
+                  </button>
+                </>
+              )}
             </div>
+          </div>
+        ) : (
+          <>
+        {/* Scanner Section */}
+        {!result && !loading && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <BarcodeScanner
+              onScanComplete={handleScanComplete}
+              onError={handleScanError}
+            />
+          </div>
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+            <p className="text-lg font-medium text-gray-700">Identifying product...</p>
+            <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
           </div>
         )}
 
         {/* Error Display */}
-        {state.error && (
-          <div
-            className="mb-4 p-4 bg-red-50 border-l-4 border-red-500 rounded-lg"
-            role="alert"
-            aria-live="polite"
-          >
-            <div className="flex items-start gap-3">
-              <span className="text-2xl flex-shrink-0" role="img" aria-label="error">
-                ❌
-              </span>
-              <div className="flex-1">
-                <h4 className="font-semibold text-red-900 mb-1">
-                  Analysis Error
-                </h4>
-                <p className="text-sm text-red-800 leading-relaxed">
-                  {state.error}
-                </p>
-                <div className="flex gap-2 mt-3">
-                  <button
-                    onClick={handleClearError}
-                    className="text-sm text-red-900 underline"
-                  >
-                    Dismiss
-                  </button>
-                  {state.capturedImage && (
-                    <button
-                      onClick={handleScan}
-                      className="text-sm text-red-900 font-semibold underline"
-                    >
-                      Try Again
-                    </button>
-                  )}
-                </div>
+        {error && !loading && (
+          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 mb-6">
+            <div className="flex items-start">
+              <span className="text-2xl mr-3">⚠️</span>
+              <div>
+                <h3 className="font-semibold text-red-900 mb-1">Scan Error</h3>
+                <p className="text-red-800">{error}</p>
+                <button
+                  onClick={() => {
+                    setError('');
+                    setScanning(true);
+                  }}
+                  className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                >
+                  Try Again
+                </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* History View */}
-        {showHistory ? (
+        {/* Result Display */}
+        {result && !loading && (
           <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-800">Scan History</h2>
-              <button
-                onClick={handleCloseHistory}
-                className="text-blue-600 hover:text-blue-700 font-medium"
-              >
-                Close
-              </button>
-            </div>
-
-            {history.length === 0 ? (
-              <div className="text-center py-8 px-4 bg-gray-50 rounded-lg">
-                <p className="text-gray-600">No scan history yet</p>
-                <p className="text-sm text-gray-500 mt-1">
-                  Your scanned products will appear here
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="space-y-3">
-                  {history.map((scan, index) => (
-                    <div
-                      key={scan.timestamp}
-                      className="bg-white rounded-lg shadow-md p-4 border border-gray-200"
-                    >
-                      <div className="flex gap-4">
-                        <img
-                          src={scan.imageData}
-                          alt={`Scan ${index + 1}`}
-                          className="w-20 h-20 object-cover rounded"
-                        />
-                        <div className="flex-1">
-                          <p className="text-sm text-gray-500">
-                            {new Date(scan.timestamp).toLocaleString()}
-                          </p>
-                          <p className="text-sm font-medium text-gray-700 mt-1">
-                            {scan.results.products.length} product(s) detected
-                          </p>
-                          <button
-                            onClick={() => handleLoadHistoryScan(scan)}
-                            className="text-sm text-blue-600 hover:text-blue-700 font-medium mt-2"
-                          >
-                            View Results
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                <button
-                  onClick={handleClearHistory}
-                  className="w-full min-h-[44px] px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-all duration-200"
+            {/* Success/Failure Badge */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="flex items-center justify-between mb-4">
+                <span
+                  className={`inline-block px-4 py-2 rounded-full text-white font-semibold ${
+                    result.success ? 'bg-green-500' : 'bg-red-500'
+                  }`}
                 >
-                  Clear All History
-                </button>
-              </>
-            )}
-          </div>
-        ) : (
-          <>
-            {/* Camera Capture - Always visible when no image captured */}
-            {!state.capturedImage && !state.analysisResults && (
-              <div className="space-y-4">
-                <CameraCapture
-                  onCapture={handleImageCapture}
-                  disabled={state.isAnalyzing}
-                />
+                  {result.success ? '✓ Product Identified' : '✗ Identification Failed'}
+                </span>
+                
+                <span className={`inline-block px-3 py-1 rounded-full text-white text-sm font-medium ${getTierColor(result.tier)}`}>
+                  Tier {result.tier}: {getTierName(result.tier)}
+                </span>
               </div>
-            )}
 
-            {/* Image Preview + Dimension Selector - Show when image captured but no results yet */}
-            {state.capturedImage && !state.analysisResults && (
-              <div className="space-y-4">
-                <ImagePreview
-                  imageData={state.capturedImage}
-                  onRetake={handleRetake}
-                />
-
-                {/* Dimension Selector (Free Tier Only) */}
-                {tier === 'free' && (
-                  <DimensionSelector
-                    selectedDimension={selectedDimension}
-                    onDimensionChange={setSelectedDimension}
-                    disabled={state.isAnalyzing}
-                  />
-                )}
-
-                {/* Scan Button */}
-                <ScanButton
-                  onScan={handleScan}
-                  disabled={!canScan}
-                  isLoading={state.isAnalyzing}
-                />
-              </div>
-            )}
-
-            {/* Progress Tracker (Premium Tier Only) */}
-            {state.isAnalyzing && tier === 'premium' && progressSteps.length > 0 && (
-              <div className="mb-6">
-                <ProgressTracker steps={progressSteps} isActive={state.isAnalyzing} />
-              </div>
-            )}
-
-            {/* Insights Display - Show when results available */}
-            {state.analysisResults && (
-              <div className="space-y-4">
-                {/* Show thumbnail of scanned image */}
-                <div className="bg-white rounded-lg shadow-md p-4 border border-gray-200">
-                  <div className="flex items-center gap-4">
-                    {state.capturedImage && (
-                      <img
-                        src={state.capturedImage}
-                        alt="Scanned product"
-                        className="w-20 h-20 object-cover rounded"
-                      />
-                    )}
-                    <div className="flex-1">
-                      <h3 className="font-semibold text-gray-800">
-                        Analysis Complete
-                      </h3>
-                      <p className="text-sm text-gray-600">
-                        {state.analysisResults.products.length} product(s) detected
-                      </p>
-                      {/* Data source indicator */}
-                      {fromCache !== null && (
-                        <div className="mt-2">
-                          <div className={`inline-flex items-start gap-2 px-3 py-2 rounded-lg text-xs font-medium border ${
-                            fromCache 
-                              ? 'bg-green-50 border-green-200' 
-                              : 'bg-blue-50 border-blue-200'
-                          }`}>
-                            <span className="text-lg flex-shrink-0" role="img" aria-label={fromCache ? 'cached' : 'fresh'}>
-                              {fromCache ? '⚡' : '🤖'}
-                            </span>
-                            <div className="flex flex-col gap-0.5">
-                              <span className={`font-semibold leading-tight ${
-                                fromCache ? 'text-green-700' : 'text-blue-700'
-                              }`}>
-                                {fromCache ? 'Cached Data' : 'Fresh AI Analysis'}
-                              </span>
-                              <span className={`text-[10px] leading-tight ${
-                                fromCache ? 'text-green-600' : 'text-blue-600'
-                              }`}>
-                                {fromCache 
-                                  ? 'Retrieved from MongoDB cache' 
-                                  : 'Generated by Gemini 2.0 Flash'}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      {tier === 'premium' && progressSteps.length > 0 && (
-                        <p className="text-xs text-purple-600 mt-1">
-                          🔍 Research Agent used {progressSteps.length} step(s)
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      onClick={handleRetake}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all duration-200"
-                    >
-                      New Scan
-                    </button>
+              {/* Warning */}
+              {result.warning && (
+                <div className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
+                  <div className="flex items-start">
+                    <span className="text-yellow-600 mr-2 text-xl">⚠️</span>
+                    <p className="text-sm text-yellow-800">{result.warning}</p>
                   </div>
                 </div>
+              )}
 
-                {/* Display insights with tier support */}
-                <InsightsDisplay 
-                  results={state.analysisResults}
-                  tier={tier}
-                  dimension={selectedDimension || undefined}
-                  fromCache={fromCache}
-                />
+              {/* Product Information */}
+              {result.product && (
+                <div className="space-y-4">
+                  <div>
+                    <h2 className="text-2xl font-bold text-gray-900 mb-1">
+                      {result.product.name}
+                    </h2>
+                    <p className="text-lg text-gray-600">{result.product.brand}</p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
+                    {result.product.barcode && (
+                      <div>
+                        <p className="text-sm text-gray-500">Barcode</p>
+                        <p className="font-mono font-semibold">{result.product.barcode}</p>
+                      </div>
+                    )}
+                    
+                    {result.product.size && (
+                      <div>
+                        <p className="text-sm text-gray-500">Size</p>
+                        <p className="font-semibold">{result.product.size}</p>
+                      </div>
+                    )}
+                    
+                    <div>
+                      <p className="text-sm text-gray-500">Category</p>
+                      <p className="font-semibold">{result.product.category}</p>
+                    </div>
+                    
+                    <div>
+                      <p className="text-sm text-gray-500">Confidence</p>
+                      <p className="font-semibold">
+                        {(result.confidenceScore * 100).toFixed(0)}%
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Metrics */}
+                  <div className="pt-4 border-t flex items-center justify-between text-sm">
+                    <span className={`px-3 py-1 rounded-full ${result.cached ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
+                      {result.cached ? '💾 Cached' : '🤖 Fresh'}
+                    </span>
+                    <span className="text-gray-600">
+                      {result.processingTimeMs}ms
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Dimension Analysis Results */}
+            {result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    🎯 Dimension Analysis
+                  </h3>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    result.dimensionCached 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {result.dimensionCached ? '💾 Cached' : '🤖 Fresh'}
+                  </span>
+                </div>
+
+                {/* User Tier Badge */}
+                <div className="mb-4 flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    result.userTier === 'premium'
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {result.userTier === 'premium' ? '💎 Premium Tier' : '📋 Free Tier'}
+                  </span>
+                  {result.upgradePrompt && (
+                    <span className="text-sm text-gray-600">
+                      {result.upgradePrompt}
+                    </span>
+                  )}
+                </div>
+
+                {/* Dimensions Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(result.dimensionAnalysis.dimensions).map(([key, dimension]) => {
+                    const getScoreColor = (score: number) => {
+                      if (score >= 67) return 'text-green-600 bg-green-50';
+                      if (score >= 34) return 'text-yellow-600 bg-yellow-50';
+                      return 'text-red-600 bg-red-50';
+                    };
+
+                    const getDimensionLabel = (key: string) => {
+                      const labels: Record<string, string> = {
+                        health: '🏥 Health',
+                        processing: '🏭 Processing',
+                        allergens: '⚠️ Allergens',
+                        responsiblyProduced: '🌱 Responsible',
+                        environmentalImpact: '🌍 Environmental',
+                      };
+                      return labels[key] || key;
+                    };
+
+                    return (
+                      <div
+                        key={key}
+                        className={`p-4 rounded-lg border-2 ${
+                          dimension.locked
+                            ? 'bg-gray-50 border-gray-200 opacity-60'
+                            : 'bg-white border-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-semibold text-gray-900">
+                            {getDimensionLabel(key)}
+                          </span>
+                          {dimension.locked ? (
+                            <span className="text-2xl">🔒</span>
+                          ) : (
+                            <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(dimension.score)}`}>
+                              {dimension.score}
+                            </span>
+                          )}
+                        </div>
+                        {dimension.available && !dimension.locked && (
+                          <div>
+                            <p className="text-sm text-gray-600 mb-2">
+                              {dimension.explanation}
+                            </p>
+                            {dimension.keyFactors && dimension.keyFactors.length > 0 && (
+                              <ul className="text-xs text-gray-500 space-y-1">
+                                {dimension.keyFactors.map((factor, idx) => (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="mr-1">•</span>
+                                    <span>{factor}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                        {dimension.locked && (
+                          <p className="text-sm text-gray-500 italic">
+                            Upgrade to Premium to unlock
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Overall Confidence */}
+                <div className="mt-4 pt-4 border-t text-center">
+                  <span className="text-sm text-gray-600">
+                    Analysis Confidence: {' '}
+                    <span className="font-semibold">
+                      {(result.dimensionAnalysis.overallConfidence * 100).toFixed(0)}%
+                    </span>
+                  </span>
+                </div>
               </div>
             )}
-          </>
-        )}
-      </main>
-      </AuthGuard>
 
-      {/* Footer with History Controls */}
-      {!showHistory && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg">
-          <div className="max-w-2xl mx-auto px-4 py-3">
-            <div className="flex gap-3">
+            {/* Dimension Analysis Failed */}
+            {result.dimensionStatus === 'failed' && (
+              <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6">
+                <div className="flex items-start">
+                  <span className="text-2xl mr-3">⚠️</span>
+                  <div>
+                    <h3 className="font-semibold text-yellow-900 mb-1">
+                      Dimension Analysis Unavailable
+                    </h3>
+                    <p className="text-yellow-800 text-sm">
+                      Product was identified successfully, but dimension analysis failed. 
+                      This may be due to API rate limits. Try again in a moment.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex gap-4">
               <button
-                onClick={handleViewHistory}
-                className="flex-1 min-h-[44px] px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-all duration-200 flex items-center justify-center gap-2"
+                onClick={() => {
+                  setResult(null);
+                  setScanning(true);
+                }}
+                className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
               >
-                <span role="img" aria-label="history">📋</span>
-                View History
+                🔄 Scan Another
               </button>
-              {state.analysisResults && (
+              
+              {result.success && result.product && (
                 <button
-                  onClick={handleRetake}
-                  className="flex-1 min-h-[44px] px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all duration-200"
+                  onClick={() => {
+                    // TODO: Implement add to list functionality
+                    alert('Add to list functionality coming soon!');
+                  }}
+                  className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition-colors"
                 >
-                  Scan Another
+                  ✓ Add to List
                 </button>
               )}
             </div>
+
+            {/* Report Error Option */}
+            {result.success && result.product && result.confidenceScore < 0.9 && (
+              <button
+                onClick={() => {
+                  // TODO: Implement error reporting
+                  alert('Error reporting functionality coming soon!');
+                }}
+                className="w-full px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
+              >
+                ⚠️ Report Incorrect Identification
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Info Section */}
+        {!result && !loading && !error && (
+          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
+            <h3 className="font-semibold text-blue-900 mb-2">How it works:</h3>
+            <ul className="space-y-2 text-sm text-blue-800">
+              <li className="flex items-start">
+                <span className="mr-2">1️⃣</span>
+                <span>Take a photo of the product barcode or packaging</span>
+              </li>
+              <li className="flex items-start">
+                <span className="mr-2">2️⃣</span>
+                <span>System automatically detects barcodes for instant lookup</span>
+              </li>
+              <li className="flex items-start">
+                <span className="mr-2">3️⃣</span>
+                <span>If no barcode, AI analyzes the product image</span>
+              </li>
+              <li className="flex items-start">
+                <span className="mr-2">4️⃣</span>
+                <span>Get product details in seconds!</span>
+              </li>
+            </ul>
+          </div>
+        )}
+          </>
+        )}
+      </div>
+
+      {/* Footer with History Button */}
+      {!showHistory && !loading && (
+        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg">
+          <div className="max-w-4xl mx-auto px-4 py-3">
+            <button
+              onClick={handleViewHistory}
+              className="w-full px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
+            >
+              <span role="img" aria-label="history">📋</span>
+              View History
+            </button>
           </div>
         </footer>
       )}
     </div>
-  );
-}
-
-/**
- * Main page export with TierProvider wrapper
- */
-export default function Home() {
-  return (
-    <TierProvider>
-      <ScannerApp />
-    </TierProvider>
   );
 }

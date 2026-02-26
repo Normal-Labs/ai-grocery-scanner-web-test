@@ -41,6 +41,7 @@ Quick reference to all documentation files in this project.
   - `20240101000000_initial_schema.sql` - Initial product and store schema
   - `20260225000000_multi_tier_schema.sql` - Multi-tier scan logging
   - `20260226000000_dimension_analysis_schema.sql` - Dimension analysis fields
+  - `20260227000000_fix_product_search.sql` - Improved product duplicate detection
 
 ## Quick Links
 
