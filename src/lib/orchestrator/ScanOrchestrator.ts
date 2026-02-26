@@ -13,6 +13,7 @@ import { StoreRepository } from '../supabase/repositories/StoreRepository';
 import { InventoryRepository } from '../supabase/repositories/InventoryRepository';
 import { MongoDBCacheRepository } from '../mongodb/cache';
 import { withRetry } from './errors';
+import { hashImage } from '../imageHash';
 import type { 
   ScanRequest, 
   ScanResult, 
@@ -102,50 +103,81 @@ export class ScanOrchestrator {
     });
 
     try {
-      // Step 1: Check MongoDB cache for existing insight (only if barcode provided)
+      // Step 1: Check MongoDB cache for existing insight
       // Requirement 5.1: Query MongoDB AI_Cache for existing insights
       let cachedInsight: CachedInsight | null = null;
+      let imageHash: string | undefined;
       
-      if (request.barcode) {
+      // Generate image hash for cache lookup (even if barcode is provided)
+      try {
+        imageHash = await hashImage(request.imageData);
+        console.log('[ScanOrchestrator] ✅ Generated image hash:', imageHash.substring(0, 16) + '...');
+      } catch (error) {
+        console.error('[ScanOrchestrator] ❌ Failed to generate image hash:', error);
+        console.error('[ScanOrchestrator] Error details:', {
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+        });
+      }
+      
+      // Try cache lookup with barcode first, then image hash
+      if (request.barcode || imageHash) {
         try {
+          console.log('[ScanOrchestrator] 🔍 Attempting cache lookup with:', {
+            barcode: request.barcode || 'none',
+            imageHash: imageHash ? imageHash.substring(0, 16) + '...' : 'none',
+          });
+          
           cachedInsight = await withRetry(
-            async () => await this.cacheRepo.get(request.barcode!),
+            async () => await this.cacheRepo.get(request.barcode, imageHash),
             3,
             1000
           );
+          
+          if (cachedInsight) {
+            console.log('[ScanOrchestrator] ✅ Cache lookup successful!');
+          } else {
+            console.log('[ScanOrchestrator] ❌ Cache lookup returned null (cache miss)');
+          }
         } catch (error) {
           // Log cache error but continue with cache miss flow
           // Requirement 10.5: Log all database errors with context
-          console.error('[ScanOrchestrator] MongoDB cache error (continuing as cache miss):', {
-            barcode: request.barcode,
+          console.error('[ScanOrchestrator] ❌ MongoDB cache error (continuing as cache miss):', {
+            barcode: request.barcode || 'none',
+            imageHash: imageHash?.substring(0, 16) + '...',
             error: error instanceof Error ? error.message : String(error),
+            errorStack: error instanceof Error ? error.stack : undefined,
             timestamp: new Date().toISOString(),
           });
         }
       } else {
-        console.log('[ScanOrchestrator] No barcode provided, skipping cache lookup');
+        console.log('[ScanOrchestrator] ⚠️  No barcode or image hash available, skipping cache lookup');
       }
 
       // Step 2: Handle cache hit or cache miss
       let result: ScanResult;
       
-      if (cachedInsight && request.barcode) {
+      if (cachedInsight) {
         console.log('[ScanOrchestrator] Cache hit:', {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
+          imageHash: imageHash?.substring(0, 16) + '...',
           productName: cachedInsight.productName,
           scanCount: cachedInsight.scanCount,
           cacheAge: Date.now() - cachedInsight.createdAt.getTime(),
         });
+        console.log('📊 [DATA SOURCE] MongoDB Cache - Instant retrieval');
         
         // Requirement 5.2, 5.3: Handle cache hit
-        result = await this.handleCacheHit(request.barcode, cachedInsight, request);
+        result = await this.handleCacheHit(request.barcode, imageHash, cachedInsight, request);
       } else {
         console.log('[ScanOrchestrator] Cache miss:', {
           barcode: request.barcode || 'none',
+          imageHash: imageHash?.substring(0, 16) + '...',
         });
+        console.log('🤖 [DATA SOURCE] Fresh AI Analysis - Calling Gemini 2.0 Flash');
         
         // Requirement 5.4, 5.5, 5.6: Handle cache miss
-        result = await this.handleCacheMiss(request);
+        result = await this.handleCacheMiss(request, imageHash);
       }
 
       // Step 3: Process location if provided
@@ -178,6 +210,25 @@ export class ScanOrchestrator {
         duration,
         timestamp: new Date().toISOString(),
       });
+      
+      // Summary log showing complete data flow
+      console.log('═══════════════════════════════════════════════════');
+      console.log('📋 SCAN SUMMARY');
+      console.log('═══════════════════════════════════════════════════');
+      console.log(`Product: ${result.product.name}`);
+      console.log(`Barcode: ${request.barcode || 'Not provided'}`);
+      console.log(`Data Source: ${result.fromCache ? '⚡ MongoDB Cache (Instant)' : '🤖 Fresh AI Analysis (Gemini 2.0 Flash)'}`);
+      console.log(`Tier: ${request.tier}`);
+      console.log(`Duration: ${duration}ms`);
+      if (result.storeId) {
+        console.log(`Store Location: Recorded (ID: ${result.storeId})`);
+      }
+      if (result.fromCache) {
+        console.log('💡 This result was retrieved instantly from cache');
+      } else {
+        console.log('💡 This result was freshly generated and saved to cache');
+      }
+      console.log('═══════════════════════════════════════════════════');
 
       return result;
     } catch (error) {
@@ -222,100 +273,77 @@ export class ScanOrchestrator {
    * - 5.3: Return cached insight without triggering Research Agent
    * - 10.4: Use retry logic for database operations
    * 
-   * @param barcode - Product barcode
+   * @param barcode - Product barcode (optional)
+   * @param imageHash - Image hash (optional)
    * @param cachedInsight - Cached insight from MongoDB
    * @param request - Original scan request
    * @returns Promise resolving to scan result with cached data
    */
   private async handleCacheHit(
-    barcode: string,
+    barcode: string | undefined,
+    imageHash: string | undefined,
     cachedInsight: CachedInsight,
     request: ScanRequest
   ): Promise<ScanResult> {
     console.log('[ScanOrchestrator] Handling cache hit:', {
-      barcode,
+      barcode: barcode || 'none',
+      imageHash: imageHash?.substring(0, 16) + '...',
       productName: cachedInsight.productName,
     });
 
-    // Step 1: Update last_scanned_at in Supabase
+    // Step 1: Update last_scanned_at in Supabase (only if barcode exists)
     // Requirement 5.2: Update last_scanned_at timestamp on cache hit
-    try {
-      await withRetry(
-        async () => await this.productRepo.updateLastScanned(barcode),
-        3,
-        1000
-      );
-    } catch (error) {
-      // Log error but continue - cache hit is still valid
-      // Requirement 10.5: Log all database errors with context
-      console.error('[ScanOrchestrator] Failed to update last_scanned_at (continuing):', {
-        barcode,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    // Step 2: Increment scan count in MongoDB
-    try {
-      await this.cacheRepo.incrementScanCount(barcode);
-    } catch (error) {
-      // Log error but continue - non-critical operation
-      console.error('[ScanOrchestrator] Failed to increment scan count (continuing):', {
-        barcode,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-    }
-
-    // Step 3: Get product from Supabase for metadata
-    let product;
-    try {
-      product = await withRetry(
-        async () => await this.productRepo.findByBarcode(barcode),
-        3,
-        1000
-      );
-    } catch (error) {
-      // If we can't get product from Supabase, create a minimal product object
-      console.error('[ScanOrchestrator] Failed to get product from Supabase (using cached data):', {
-        barcode,
-        error: error instanceof Error ? error.message : String(error),
-        timestamp: new Date().toISOString(),
-      });
-      
-      // Create minimal product object from cached data
-      product = {
-        id: '', // Will be empty but scan can continue
-        barcode,
-        name: cachedInsight.productName,
-        brand: null,
-        last_scanned_at: new Date().toISOString(),
-        created_at: cachedInsight.createdAt.toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-    }
-
-    // If product doesn't exist in Supabase, create it
-    if (!product) {
+    if (barcode) {
       try {
-        product = await withRetry(
-          async () => await this.productRepo.upsert({
-            barcode,
-            name: cachedInsight.productName,
-          }),
+        await withRetry(
+          async () => await this.productRepo.updateLastScanned(barcode),
           3,
           1000
         );
       } catch (error) {
-        // If we can't create product, use minimal object
-        console.error('[ScanOrchestrator] Failed to create product in Supabase (using cached data):', {
+        // Log error but continue - cache hit is still valid
+        // Requirement 10.5: Log all database errors with context
+        console.error('[ScanOrchestrator] Failed to update last_scanned_at (continuing):', {
+          barcode,
+          error: error instanceof Error ? error.message : String(error),
+          timestamp: new Date().toISOString(),
+        });
+      }
+    }
+
+    // Step 2: Increment scan count in MongoDB
+    try {
+      await this.cacheRepo.incrementScanCount(barcode, imageHash);
+    } catch (error) {
+      // Log error but continue - non-critical operation
+      console.error('[ScanOrchestrator] Failed to increment scan count (continuing):', {
+        barcode: barcode || 'none',
+        imageHash: imageHash?.substring(0, 16) + '...',
+        error: error instanceof Error ? error.message : String(error),
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    // Step 3: Get product from Supabase for metadata (only if barcode exists)
+    let product;
+    if (barcode) {
+      try {
+        product = await withRetry(
+          async () => await this.productRepo.findByBarcode(barcode),
+          3,
+          1000
+        );
+      } catch (error) {
+        // If we can't get product from Supabase, create a minimal product object
+        console.error('[ScanOrchestrator] Failed to get product from Supabase (using cached data):', {
           barcode,
           error: error instanceof Error ? error.message : String(error),
           timestamp: new Date().toISOString(),
         });
         
+        // Create minimal product object from cached data
         product = {
-          id: '',
+          id: '', // Will be empty but scan can continue
           barcode,
           name: cachedInsight.productName,
           brand: null,
@@ -324,6 +352,48 @@ export class ScanOrchestrator {
           updated_at: new Date().toISOString(),
         };
       }
+
+      // If product doesn't exist in Supabase, create it
+      if (!product) {
+        try {
+          product = await withRetry(
+            async () => await this.productRepo.upsert({
+              barcode,
+              name: cachedInsight.productName,
+            }),
+            3,
+            1000
+          );
+        } catch (error) {
+          // If we can't create product, use minimal object
+          console.error('[ScanOrchestrator] Failed to create product in Supabase (using cached data):', {
+            barcode,
+            error: error instanceof Error ? error.message : String(error),
+            timestamp: new Date().toISOString(),
+          });
+          
+          product = {
+            id: '',
+            barcode,
+            name: cachedInsight.productName,
+            brand: null,
+            last_scanned_at: new Date().toISOString(),
+            created_at: cachedInsight.createdAt.toISOString(),
+            updated_at: new Date().toISOString(),
+          };
+        }
+      }
+    } else {
+      // No barcode - create minimal product object
+      product = {
+        id: '',
+        barcode: '',
+        name: cachedInsight.productName,
+        brand: null,
+        last_scanned_at: new Date().toISOString(),
+        created_at: cachedInsight.createdAt.toISOString(),
+        updated_at: new Date().toISOString(),
+      };
     }
 
     // Step 4: Return cached insight
@@ -358,9 +428,10 @@ export class ScanOrchestrator {
    * - 10.4: Use retry logic for database operations
    * 
    * @param request - Original scan request
+   * @param imageHash - Hash of the image for caching
    * @returns Promise resolving to scan result with new analysis
    */
-  private async handleCacheMiss(request: ScanRequest): Promise<ScanResult> {
+  private async handleCacheMiss(request: ScanRequest, imageHash?: string): Promise<ScanResult> {
     console.log('[ScanOrchestrator] Handling cache miss:', {
       barcode: request.barcode || 'none',
       tier: request.tier,
@@ -426,7 +497,7 @@ export class ScanOrchestrator {
       );
     }
 
-    // Step 2: Save insight to MongoDB cache (only if barcode provided)
+    // Step 2: Save insight to MongoDB cache (with barcode or image hash)
     // Requirement 5.5: Save insight to MongoDB after Research Agent completes
     // Note: We save the first product from the analysis result
     const firstProduct = analysisResult.products[0];
@@ -440,34 +511,38 @@ export class ScanOrchestrator {
       );
     }
 
-    if (request.barcode) {
+    if (request.barcode || imageHash) {
       try {
         await withRetry(
           async () => await this.cacheRepo.set(
-            request.barcode!,
+            request.barcode,
             firstProduct.productName,
             firstProduct.insights,
-            30 // 30 days TTL
+            30, // 30 days TTL
+            imageHash
           ),
           3,
           1000
         );
         
         console.log('[ScanOrchestrator] Saved insight to MongoDB cache:', {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
+          imageHash: imageHash?.substring(0, 16) + '...',
           productName: firstProduct.productName,
         });
+        console.log('💾 [DATABASE] Saved to MongoDB cache for future instant retrieval');
       } catch (error) {
         // Log error but continue - cache save failure shouldn't fail the scan
         // Requirement 10.5: Log all database errors with context
         console.error('[ScanOrchestrator] Failed to save insight to cache (continuing):', {
-          barcode: request.barcode,
+          barcode: request.barcode || 'none',
+          imageHash: imageHash?.substring(0, 16) + '...',
           error: error instanceof Error ? error.message : String(error),
           timestamp: new Date().toISOString(),
         });
       }
     } else {
-      console.log('[ScanOrchestrator] No barcode provided, skipping cache save');
+      console.log('[ScanOrchestrator] No barcode or image hash available, skipping cache save');
     }
 
     // Step 3: Upsert product to Supabase (only if barcode provided)
@@ -492,6 +567,7 @@ export class ScanOrchestrator {
           productId: product.id,
           productName: product.name,
         });
+        console.log('💾 [DATABASE] Saved product metadata to Supabase');
       } catch (error) {
         // Requirement 10.5: Log all database errors with context
         console.error('[ScanOrchestrator] Failed to save product to Supabase:', {

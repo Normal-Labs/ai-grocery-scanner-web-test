@@ -10,7 +10,17 @@
 
 import { getSupabaseClient } from '../client';
 import type { Store, StoreInsert, StoreWithDistance, Coordinates } from '../types';
-import { createGeoJSONPoint } from '../types';
+
+/**
+ * Helper function to create GeoJSON string from coordinates
+ * (Local implementation since it was removed from types in multi-tier refactor)
+ */
+function createGeoJSONPoint(latitude: number, longitude: number): string {
+  return JSON.stringify({
+    type: 'Point',
+    coordinates: [longitude, latitude], // PostGIS uses [lng, lat] order
+  });
+}
 
 /**
  * Consistent error format for repository operations

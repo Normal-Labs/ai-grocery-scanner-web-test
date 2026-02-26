@@ -1,26 +1,32 @@
 /**
- * MongoDB type definitions for AI Cache
+ * MongoDB type definitions for Multi-Tier Cache
  * 
  * This file contains TypeScript interfaces for MongoDB collections
- * used to cache AI-generated product insights.
+ * used to cache product identification results.
  * 
- * Requirements: 5.1
+ * Requirements: 7.1, 7.2, 7.3, 7.4, 7.5
  */
 
-import { ProductInsights } from '@/lib/types';
+import { ObjectId } from 'mongodb';
+import { ProductData, Tier, ConfidenceScore, CacheKeyType } from '@/lib/types/multi-tier';
 
 /**
- * Cached insight document stored in MongoDB
- * Represents an AI-generated product analysis with TTL expiration
+ * Cache entry document stored in MongoDB
+ * Represents a cached product identification result with TTL expiration
+ * 
+ * Requirements: 7.1, 7.2, 7.3, 7.4
  */
-export interface CachedInsight {
-  _id?: string;
-  barcode: string;
-  productName: string;
-  insights: ProductInsights;
+export interface CacheEntryDocument {
+  _id?: ObjectId;
+  key: string;
+  keyType: CacheKeyType;
+  productData: ProductData;
+  tier: Tier;
+  confidenceScore: ConfidenceScore;
   createdAt: Date;
+  lastAccessedAt: Date;
+  accessCount: number;
   expiresAt: Date;
-  scanCount: number;
 }
 
 /**
@@ -29,5 +35,17 @@ export interface CachedInsight {
  */
 export interface CacheResult {
   hit: boolean;
-  insight?: CachedInsight;
+  entry?: CacheEntryDocument;
+}
+
+/**
+ * Cache statistics
+ */
+export interface CacheStats {
+  totalEntries: number;
+  barcodeEntries: number;
+  imageHashEntries: number;
+  avgAccessCount: number;
+  oldestEntry: Date | null;
+  newestEntry: Date | null;
 }

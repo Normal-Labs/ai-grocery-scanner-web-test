@@ -47,7 +47,8 @@ export class MongoDBCacheRepository {
    * Ensure required indexes exist on the insights collection
    * 
    * Creates the following indexes:
-   * - barcode: unique index for fast lookups
+   * - barcode: index for fast lookups (not unique anymore since it can be null)
+   * - imageHash: index for image-based lookups
    * - expiresAt: TTL index for automatic document expiration
    * - createdAt: index for sorting by creation time
    * 
@@ -57,10 +58,16 @@ export class MongoDBCacheRepository {
    */
   private async ensureIndexes(collection: Collection<CachedInsight>): Promise<void> {
     try {
-      // Create unique index on barcode for fast lookups
+      // Create index on barcode for fast lookups (sparse since barcode can be null)
       await collection.createIndex(
         { barcode: 1 },
-        { unique: true, name: 'barcode_unique' }
+        { sparse: true, name: 'barcode_sparse' }
+      );
+
+      // Create index on imageHash for image-based lookups (sparse since imageHash can be null)
+      await collection.createIndex(
+        { imageHash: 1 },
+        { sparse: true, name: 'imageHash_sparse' }
       );
 
       // Create TTL index on expiresAt for automatic expiration
@@ -85,17 +92,18 @@ export class MongoDBCacheRepository {
   }
 
   /**
-   * Get cached insight by barcode
+   * Get cached insight by barcode or image hash
    * 
-   * Queries MongoDB for an existing insight by barcode. Returns null if:
-   * - No insight exists for the barcode
+   * Queries MongoDB for an existing insight by barcode or image hash. Returns null if:
+   * - No insight exists for the barcode/hash
    * - The insight has expired (expiresAt < now)
    * 
    * Requirements:
    * - 5.1: Query MongoDB AI_Cache for existing insights
    * - 5.3: Return cached insight without triggering Research_Agent
    * 
-   * @param barcode - Product barcode to look up
+   * @param barcode - Product barcode to look up (optional)
+   * @param imageHash - Hash of the product image (optional)
    * @returns Cached insight or null if not found/expired
    * 
    * @example
@@ -109,19 +117,52 @@ export class MongoDBCacheRepository {
    * }
    * ```
    */
-  async get(barcode: string): Promise<CachedInsight | null> {
+  async get(barcode?: string, imageHash?: string): Promise<CachedInsight | null> {
     try {
+      console.log('[MongoDB Cache] 🔍 Cache lookup attempt:', {
+        barcode: barcode || 'none',
+        imageHash: imageHash ? imageHash.substring(0, 16) + '...' : 'none',
+      });
+      
       const collection = await this.getCollection();
       
-      // Query for insight by barcode, ensuring it hasn't expired
-      const insight = await collection.findOne({
-        barcode,
+      // Build query based on what's provided
+      const query: any = {
         expiresAt: { $gt: new Date() } // Only return if not expired
-      });
+      };
+      
+      if (barcode) {
+        query.barcode = barcode;
+      } else if (imageHash) {
+        query.imageHash = imageHash;
+      } else {
+        // Neither barcode nor imageHash provided
+        console.log('[MongoDB Cache] ❌ No barcode or imageHash provided');
+        return null;
+      }
+      
+      console.log('[MongoDB Cache] Query:', JSON.stringify(query));
+      
+      // Query for insight, ensuring it hasn't expired
+      const insight = await collection.findOne(query);
+
+      if (insight) {
+        console.log('[MongoDB Cache] ✅ Cache HIT:', {
+          productName: insight.productName,
+          scanCount: insight.scanCount,
+          createdAt: insight.createdAt,
+        });
+      } else {
+        console.log('[MongoDB Cache] ❌ Cache MISS - no matching document found');
+      }
 
       return insight;
     } catch (error) {
-      console.error('Error getting cached insight:', error);
+      console.error('[MongoDB Cache] ❌ Error getting cached insight:', error);
+      console.error('[MongoDB Cache] Error details:', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       // Return null on error to trigger cache miss behavior
       return null;
     }
@@ -136,10 +177,11 @@ export class MongoDBCacheRepository {
    * Requirements:
    * - 5.5: Save insight to MongoDB AI_Cache after Research_Agent completes
    * 
-   * @param barcode - Product barcode
+   * @param barcode - Product barcode (optional)
    * @param productName - Product name
    * @param insights - AI-generated product insights
    * @param ttlDays - Time to live in days (default: 30)
+   * @param imageHash - Hash of the product image (optional, for barcode-less caching)
    * 
    * @example
    * ```typescript
@@ -153,23 +195,46 @@ export class MongoDBCacheRepository {
    * ```
    */
   async set(
-    barcode: string,
+    barcode: string | undefined,
     productName: string,
     insights: ProductInsights,
-    ttlDays: number = 30
+    ttlDays: number = 30,
+    imageHash?: string
   ): Promise<void> {
     try {
+      console.log('[MongoDB Cache] 💾 Saving to cache:', {
+        barcode: barcode || 'none',
+        imageHash: imageHash ? imageHash.substring(0, 16) + '...' : 'none',
+        productName,
+        ttlDays,
+      });
+      
       const collection = await this.getCollection();
       
       const now = new Date();
       const expiresAt = new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000);
 
+      // Build query based on what's available
+      let query: any;
+      if (barcode) {
+        query = { barcode };
+      } else if (imageHash) {
+        query = { imageHash };
+      } else {
+        // Can't cache without either barcode or imageHash
+        console.warn('[MongoDB Cache] ⚠️  Cannot cache insight without barcode or imageHash');
+        return;
+      }
+
+      console.log('[MongoDB Cache] Upsert query:', JSON.stringify(query));
+
       // Upsert the insight (insert if new, update if exists)
-      await collection.updateOne(
-        { barcode },
+      const result = await collection.updateOne(
+        query,
         {
           $set: {
-            barcode,
+            barcode: barcode || null,
+            imageHash: imageHash || null,
             productName,
             insights,
             expiresAt
@@ -181,8 +246,19 @@ export class MongoDBCacheRepository {
         },
         { upsert: true }
       );
+      
+      console.log('[MongoDB Cache] ✅ Cache save successful:', {
+        matched: result.matchedCount,
+        modified: result.modifiedCount,
+        upserted: result.upsertedCount,
+        upsertedId: result.upsertedId,
+      });
     } catch (error) {
-      console.error('Error setting cached insight:', error);
+      console.error('[MongoDB Cache] ❌ Error setting cached insight:', error);
+      console.error('[MongoDB Cache] Error details:', {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
+      });
       // Don't throw - cache failures shouldn't break the application
       // The system will continue without caching
     }
@@ -197,7 +273,8 @@ export class MongoDBCacheRepository {
    * Requirements:
    * - 5.2: Update metadata when cache hit occurs
    * 
-   * @param barcode - Product barcode
+   * @param barcode - Product barcode (optional)
+   * @param imageHash - Image hash (optional)
    * 
    * @example
    * ```typescript
@@ -205,13 +282,23 @@ export class MongoDBCacheRepository {
    * await repo.incrementScanCount('123456789');
    * ```
    */
-  async incrementScanCount(barcode: string): Promise<void> {
+  async incrementScanCount(barcode?: string, imageHash?: string): Promise<void> {
     try {
       const collection = await this.getCollection();
       
+      // Build query based on what's provided
+      const query: any = {};
+      if (barcode) {
+        query.barcode = barcode;
+      } else if (imageHash) {
+        query.imageHash = imageHash;
+      } else {
+        return; // Nothing to increment
+      }
+      
       // Increment scanCount by 1
       await collection.updateOne(
-        { barcode },
+        query,
         { $inc: { scanCount: 1 } }
       );
     } catch (error) {
