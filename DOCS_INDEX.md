@@ -6,6 +6,13 @@ Quick reference to all documentation files in this project.
 
 - **[README.md](README.md)** - Project overview and quick start
 - **[SETUP.md](SETUP.md)** - Detailed setup instructions
+- **[CHANGELOG.md](CHANGELOG.md)** - Recent changes and updates
+
+## Deployment
+
+- **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
+- **[MONGODB_SETUP.md](MONGODB_SETUP.md)** - Step-by-step MongoDB Atlas configuration
+- **[REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)** - Quick reference for critical environment variables
 
 ## System Status
 
@@ -47,6 +54,9 @@ Quick reference to all documentation files in this project.
 
 ### I want to...
 - **Get started**: Read [SETUP.md](SETUP.md)
+- **Deploy to Vercel**: Follow [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)
+- **Set up MongoDB**: Use [MONGODB_SETUP.md](MONGODB_SETUP.md)
+- **See required env vars**: Check [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)
 - **Understand the system**: Check [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
 - **Test the system**: Use [MULTI_TIER_TESTING.md](MULTI_TIER_TESTING.md)
 - **Test dimension analysis**: Read [DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)

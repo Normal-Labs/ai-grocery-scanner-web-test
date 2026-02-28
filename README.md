@@ -13,6 +13,7 @@ A mobile-first web application that enables consumers to capture images of groce
 - 📱 **Mobile-First**: Optimized for iPhone Safari and mobile browsers
 - 🔒 **Secure**: API keys protected server-side, security headers configured
 - 💾 **Persistent Storage**: Scan history and product data stored in Supabase and MongoDB
+- 🐛 **Detailed Error Reporting**: Enhanced error display with timestamp, context, and copy-to-clipboard for field testing
 
 ## Tech Stack
 
@@ -59,15 +60,19 @@ cp .env.local.example .env.local
 ```bash
 # Required
 GOOGLE_GENERATIVE_AI_API_KEY=your_gemini_api_key
-TAVILY_API_KEY=your_tavily_api_key
 MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/ai_grocery_scanner?retryWrites=true&w=majority
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your_supabase_publishable_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
 
 # Optional
+TAVILY_API_KEY=your_tavily_api_key
+BARCODE_LOOKUP_API_KEY=your_barcode_lookup_api_key
 RATE_LIMIT_MAX_REQUESTS=10
 RATE_LIMIT_WINDOW_MS=60000
 ```
+
+See [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md) for a quick reference of all environment variables.
 
 ### Development
 
@@ -145,15 +150,20 @@ ai-grocery-scanner/
 
 **Required:**
 - `GOOGLE_GENERATIVE_AI_API_KEY`: Your Gemini API key for AI analysis
-- `TAVILY_API_KEY`: Your Tavily API key for web search (Research Agent)
 - `MONGODB_URI`: MongoDB Atlas connection string for caching AI insights
 - `NEXT_PUBLIC_SUPABASE_URL`: Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`: Your Supabase publishable API key
+- `SUPABASE_SERVICE_ROLE_KEY`: Your Supabase service role key (server-side only, never expose to client)
 
 **Optional:**
+- `TAVILY_API_KEY`: Your Tavily API key for web search (Research Agent)
+- `BARCODE_LOOKUP_API_KEY`: Your Barcode Lookup API key for Tier 3 discovery
 - `NEXT_PUBLIC_APP_URL`: Application URL for production
 - `RATE_LIMIT_MAX_REQUESTS`: Maximum requests per time window (default: 10)
 - `RATE_LIMIT_WINDOW_MS`: Rate limit time window in milliseconds (default: 60000)
+- `DEV_USER_TIER`: Development tier override ('free' or 'premium')
+
+See [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md) for a quick reference guide.
 
 ### Architecture
 
@@ -190,10 +200,19 @@ Next.js image optimization is configured for optimal performance:
 
 ### Vercel (Recommended)
 
+See [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) for complete deployment instructions.
+
+**Quick steps:**
 1. Push your code to GitHub
 2. Import the project in Vercel
-3. Add environment variables in Vercel dashboard
-4. Deploy!
+3. Add environment variables (see [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md))
+4. Configure MongoDB Atlas network access (see [MONGODB_SETUP.md](MONGODB_SETUP.md))
+5. Deploy!
+
+**Important:** Make sure to:
+- Add `SUPABASE_SERVICE_ROLE_KEY` to Vercel environment variables
+- Whitelist Vercel IPs (0.0.0.0/0) in MongoDB Atlas Network Access
+- Use `mongodb+srv://` protocol in your MongoDB connection string
 
 ### Other Platforms
 
@@ -202,6 +221,8 @@ The application can be deployed to any platform that supports Next.js:
 - AWS Amplify
 - Google Cloud Run
 - Docker containers
+
+For detailed troubleshooting, see [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md).
 
 ## Browser Support
 
