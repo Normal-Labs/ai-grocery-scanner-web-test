@@ -177,8 +177,8 @@ export async function POST(request: NextRequest) {
         const supabase = getSupabaseServerClient();
         
         // Find the most recent scan log for this session and product
-        const { data: scanLog } = await supabase
-          .from('scan_logs')
+        const { data: scanLog } = await (supabase
+          .from('scan_logs') as any)
           .select('id')
           .eq('session_id', sessionId)
           .eq('product_id', result.product.id)
@@ -186,9 +186,8 @@ export async function POST(request: NextRequest) {
           .limit(1)
           .single();
 
-        if (scanLog) {
+        if (scanLog?.id) {
           // Update with dimension analysis fields
-          // Using type assertion to bypass strict Supabase type checking
           const updateData = {
             dimension_analysis_cached: result.dimensionCached || false,
             dimension_analysis_time_ms: result.dimensionAnalysis 
