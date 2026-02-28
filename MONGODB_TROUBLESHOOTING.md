@@ -24,6 +24,18 @@ mongodb+srv://username:password@cluster.mongodb.net/database
 ### 2. Special Characters in Password
 If your password contains special characters, they MUST be URL-encoded:
 
+**⚠️ CRITICAL: Only encode the PASSWORD, not the entire URI!**
+
+```bash
+# ❌ WRONG - Entire URI encoded (will break connection)
+mongodb%3A%2F%2Fuser%3Apass%40cluster.mongodb.net%2Fdb
+
+# ✅ CORRECT - Only password encoded
+mongodb+srv://myuser:MyP%40ss%3Aword%21@cluster.mongodb.net/db?retryWrites=true&w=majority
+                      ^^^^^^^^^^^^^^^^^^
+                      Only this part is encoded!
+```
+
 | Character | Encoded |
 |-----------|---------|
 | `@` | `%40` |
@@ -50,9 +62,14 @@ If your password contains special characters, they MUST be URL-encoded:
 # Original password: p@ss:w0rd!
 # Encoded password: p%40ss%3Aw0rd%21
 
-# Connection string:
+# ✅ CORRECT - Only password is encoded:
 mongodb+srv://myuser:p%40ss%3Aw0rd%21@cluster.mongodb.net/mydb?retryWrites=true&w=majority
+
+# ❌ WRONG - Entire URI encoded (will cause "port number" error):
+mongodb%3A%2F%2Fmyuser%3Ap%40ss%3Aw0rd%21%40cluster.mongodb.net%2Fmydb
 ```
+
+**⚠️ Common Mistake:** Encoding the entire URI will make it look like it has a port number and break the connection!
 
 ### 3. MongoDB Atlas Network Access
 - [ ] Go to MongoDB Atlas → Network Access
@@ -161,6 +178,29 @@ If this fails locally, your connection string is incorrect.
    ```
    ?retryWrites=true&w=majority&serverSelectionTimeoutMS=10000
    ```
+
+### "mongodb+srv URI cannot have port number"
+
+**Cause:** The entire URI was URL-encoded instead of just the password
+
+**Fix:**
+1. **DO NOT encode the entire URI!**
+2. Only encode special characters in the password
+3. The URI should look like:
+   ```
+   mongodb+srv://user:ENCODED_PASSWORD@cluster.mongodb.net/db?retryWrites=true&w=majority
+   ```
+4. If you see `%3A%2F%2F` or similar in your URI, you've encoded too much
+5. Get a fresh connection string from MongoDB Atlas and only encode the password part
+
+**Example of what NOT to do:**
+```bash
+# ❌ WRONG - Entire URI encoded
+mongodb%3A%2F%2Fuser%3Apass%40cluster.mongodb.net%2Fdb
+
+# ✅ CORRECT - Only password encoded
+mongodb+srv://user:p%40ss@cluster.mongodb.net/db?retryWrites=true&w=majority
+```
 
 ### "Database not found"
 

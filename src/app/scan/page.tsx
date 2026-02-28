@@ -62,7 +62,7 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [error, setError] = useState<ErrorDetails | null>(null);
-  const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('free');
+  const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('premium');
 
   const handleScanComplete = async (scanData: {
     barcode?: string;

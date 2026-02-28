@@ -30,6 +30,12 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database?retryWr
 
 This is used for caching AI-generated insights to reduce API costs.
 
+**⚠️ CRITICAL: URL Encoding**
+- **Only encode special characters in the PASSWORD**
+- **DO NOT encode the entire URI** (will cause "port number" error)
+- Example: If password is `p@ss!`, encode it as `p%40ss%21`
+- The rest of the URI stays exactly as is
+
 **Important MongoDB Atlas Setup:**
 1. Create a database user with read/write permissions
 2. **Whitelist Vercel IPs:** Go to Network Access → Add IP Address → "Allow Access from Anywhere" (0.0.0.0/0)

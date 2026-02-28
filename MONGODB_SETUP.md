@@ -2,6 +2,22 @@
 
 This guide will help you configure MongoDB Atlas to work with your Vercel deployment.
 
+## ⚠️ IMPORTANT: URL Encoding Warning
+
+**Only encode special characters in your PASSWORD, NOT the entire URI!**
+
+```bash
+# ❌ WRONG - Entire URI encoded (will cause "port number" error)
+mongodb%3A%2F%2Fuser%3Apass%40cluster.mongodb.net%2Fdb
+
+# ✅ CORRECT - Only password encoded
+mongodb+srv://user:p%40ss@cluster.mongodb.net/db?retryWrites=true&w=majority
+                  ^^^^^^
+                  Only encode this part!
+```
+
+---
+
 ## Quick Setup Steps
 
 ### 1. Create MongoDB Atlas Account

@@ -6,6 +6,13 @@ All notable changes to this project will be documented in this file.
 
 ### Added - 2026-02-28
 
+#### Documentation Improvements
+- **Added prominent warnings** about URL encoding in MongoDB connection strings
+  - Clarified that only the PASSWORD should be encoded, not the entire URI
+  - Added examples of correct vs incorrect encoding
+  - Added troubleshooting for "port number" error caused by over-encoding
+  - Updated MONGODB_SETUP.md, MONGODB_TROUBLESHOOTING.md, and VERCEL_DEPLOYMENT.md
+
 #### Error Reporting for Field Testing
 - **DetailedErrorDisplay Component**: New component that shows comprehensive error information
   - Displays error message, timestamp, and error code
