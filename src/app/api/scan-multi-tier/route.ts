@@ -188,16 +188,18 @@ export async function POST(request: NextRequest) {
 
         if (scanLog) {
           // Update with dimension analysis fields
-          await supabase
-            .from('scan_logs')
-            .update({
-              dimension_analysis_cached: result.dimensionCached || false,
-              dimension_analysis_time_ms: result.dimensionAnalysis 
-                ? (totalTime - result.processingTimeMs) 
-                : null,
-              dimension_analysis_status: result.dimensionStatus as string,
-              user_tier: result.userTier as string,
-            } as any)
+          // Using type assertion to bypass strict Supabase type checking
+          const updateData = {
+            dimension_analysis_cached: result.dimensionCached || false,
+            dimension_analysis_time_ms: result.dimensionAnalysis 
+              ? (totalTime - result.processingTimeMs) 
+              : null,
+            dimension_analysis_status: result.dimensionStatus,
+            user_tier: result.userTier,
+          };
+          
+          await (supabase.from('scan_logs') as any)
+            .update(updateData)
             .eq('id', scanLog.id);
 
           console.log('[Scan API Multi-Tier] ✅ Updated scan log with dimension fields');
