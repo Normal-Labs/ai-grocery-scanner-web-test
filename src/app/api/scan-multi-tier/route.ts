@@ -195,9 +195,9 @@ export async function POST(request: NextRequest) {
               dimension_analysis_time_ms: result.dimensionAnalysis 
                 ? (totalTime - result.processingTimeMs) 
                 : null,
-              dimension_analysis_status: result.dimensionStatus,
-              user_tier: result.userTier,
-            })
+              dimension_analysis_status: result.dimensionStatus as string,
+              user_tier: result.userTier as string,
+            } as any)
             .eq('id', scanLog.id);
 
           console.log('[Scan API Multi-Tier] ✅ Updated scan log with dimension fields');
