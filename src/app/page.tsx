@@ -255,7 +255,7 @@ export default function ScanPage() {
 
   const handleLoadHistoryScan = (scan: SavedScan) => {
     // Convert SavedScan back to ScanResult format
-    const product = scan.results.products[0];
+    const product = scan.results.products[0] as any; // Type assertion for extended fields
     if (product) {
       const scanResult: ScanResult = {
         success: true,
