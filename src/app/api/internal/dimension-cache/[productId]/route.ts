@@ -12,10 +12,10 @@ import { dimensionCacheService } from '@/lib/cache/DimensionCacheService';
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { productId: string } }
+  { params }: { params: Promise<{ productId: string }> }
 ) {
   try {
-    const { productId } = params;
+    const { productId } = await params;
 
     if (!productId) {
       return NextResponse.json(
