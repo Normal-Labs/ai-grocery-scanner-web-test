@@ -569,7 +569,7 @@ export class ScanOrchestrator {
             barcode: request.barcode!,
             name: firstProduct.productName,
             // Extract brand from product name if possible (simple heuristic)
-            brand: this.extractBrand(firstProduct.productName),
+            brand: this.extractBrand(firstProduct.productName) || 'Unknown',
           }),
           3,
           1000
