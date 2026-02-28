@@ -607,7 +607,7 @@ export class ScanOrchestrator {
         id: '',
         barcode: null,
         name: firstProduct.productName,
-        brand: this.extractBrand(firstProduct.productName),
+        brand: this.extractBrand(firstProduct.productName) || 'Unknown',
         size: null,
         category: null,
         image_url: null,
