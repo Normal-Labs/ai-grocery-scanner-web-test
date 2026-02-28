@@ -283,7 +283,7 @@ export class DiscoveryService {
         console.log('[Discovery Service] 🔄 Rolling back cache updates');
         
         try {
-          if (barcodeCached) {
+          if (barcodeCached && productData.barcode) {
             if (previousBarcodeCache) {
               // Restore previous cache entry
               await cacheService.store(
