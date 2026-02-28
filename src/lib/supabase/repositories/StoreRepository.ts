@@ -137,12 +137,11 @@ export class StoreRepository {
         id: row.id,
         name: row.name,
         address: row.address,
-        location: typeof row.location === 'string' 
-          ? row.location 
-          : JSON.stringify(row.location),
+        latitude: row.latitude || 0,
+        longitude: row.longitude || 0,
         created_at: row.created_at,
         updated_at: row.updated_at,
-        distance_meters: row.distance_meters,
+        distance: row.distance_meters / 1000, // Convert meters to kilometers
       }));
 
       return stores;
@@ -253,11 +252,11 @@ export class StoreRepository {
         console.log('Found existing store within 100m:', {
           storeId: closestStore.id,
           storeName: closestStore.name,
-          distance: closestStore.distance_meters,
+          distance: closestStore.distance,
         });
         
-        // Remove distance_meters property to return a Store type
-        const { distance_meters, ...store } = closestStore;
+        // Remove distance property to return a Store type
+        const { distance, ...store } = closestStore;
         return store;
       }
 
@@ -272,7 +271,8 @@ export class StoreRepository {
       return await this.create({
         name,
         address,
-        location: createGeoJSONPoint(latitude, longitude),
+        latitude,
+        longitude,
       });
     } catch (error) {
       if (this.isRepositoryError(error)) {
@@ -331,25 +331,10 @@ export class StoreRepository {
           { data }
         );
       }
-      if (!data.location) {
+      if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') {
         throw this.createError(
-          'INVALID_LOCATION',
-          'Store location cannot be empty',
-          false,
-          { data }
-        );
-      }
-
-      // Validate GeoJSON format
-      try {
-        const geoJSON = JSON.parse(data.location);
-        if (geoJSON.type !== 'Point' || !Array.isArray(geoJSON.coordinates) || geoJSON.coordinates.length !== 2) {
-          throw new Error('Invalid GeoJSON Point format');
-        }
-      } catch (parseError) {
-        throw this.createError(
-          'INVALID_GEOJSON',
-          `Invalid GeoJSON format: ${parseError instanceof Error ? parseError.message : String(parseError)}`,
+          'INVALID_COORDINATES',
+          'Store latitude and longitude must be valid numbers',
           false,
           { data }
         );

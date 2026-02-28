@@ -438,7 +438,11 @@ export class InventoryRepository {
           barcode: row.product_barcode,
           name: row.product_name,
           brand: row.product_brand,
-          last_scanned_at: row.product_last_scanned_at,
+          size: null,
+          category: null,
+          image_url: null,
+          metadata: null,
+          flagged_for_review: false,
           created_at: row.product_created_at,
           updated_at: row.product_updated_at,
         };
@@ -448,12 +452,11 @@ export class InventoryRepository {
           id: row.store_id,
           name: row.store_name,
           address: row.store_address,
-          location: typeof row.store_location === 'string' 
-            ? row.store_location 
-            : JSON.stringify(row.store_location),
+          latitude: row.store_latitude || 0,
+          longitude: row.store_longitude || 0,
           created_at: row.store_created_at,
           updated_at: row.store_updated_at,
-          distance_meters: row.distance_meters,
+          distance: row.distance_meters / 1000, // Convert meters to kilometers
         };
 
         // Add to map, grouping stores by product
@@ -470,7 +473,7 @@ export class InventoryRepository {
       // Convert map to array and sort stores by distance within each product
       const results = Array.from(productMap.values()).map(item => ({
         product: item.product,
-        stores: item.stores.sort((a, b) => a.distance_meters - b.distance_meters),
+        stores: item.stores.sort((a, b) => a.distance - b.distance),
       }));
 
       return results;

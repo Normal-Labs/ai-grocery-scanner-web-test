@@ -286,6 +286,80 @@ export interface ScanLogUpdate {
   // Scan logs are typically immutable, but included for completeness
 }
 
+/**
+ * Store type
+ * Represents a physical store location
+ */
+export interface Store {
+  /** Unique identifier (UUID) */
+  id: string;
+  /** Store name */
+  name: string;
+  /** Store address */
+  address: string;
+  /** Latitude coordinate */
+  latitude: number;
+  /** Longitude coordinate */
+  longitude: number;
+  /** Timestamp of creation */
+  created_at: string;
+  /** Timestamp of last update */
+  updated_at: string;
+}
+
+/**
+ * Store with calculated distance
+ */
+export interface StoreWithDistance extends Store {
+  /** Distance in kilometers */
+  distance: number;
+}
+
+/**
+ * Store insert type
+ */
+export interface StoreInsert {
+  /** Store name (required) */
+  name: string;
+  /** Store address (required) */
+  address: string;
+  /** Latitude coordinate (required) */
+  latitude: number;
+  /** Longitude coordinate (required) */
+  longitude: number;
+}
+
+/**
+ * Store inventory type
+ * Tracks product availability at stores
+ */
+export interface StoreInventory {
+  /** Unique identifier (UUID) */
+  id: string;
+  /** Store ID reference */
+  store_id: string;
+  /** Product ID reference */
+  product_id: string;
+  /** Last seen timestamp */
+  last_seen_at: string;
+  /** Timestamp of creation */
+  created_at: string;
+  /** Timestamp of last update */
+  updated_at: string;
+}
+
+/**
+ * Store inventory insert type
+ */
+export interface StoreInventoryInsert {
+  /** Store ID reference (required) */
+  store_id: string;
+  /** Product ID reference (required) */
+  product_id: string;
+  /** Last seen timestamp (optional, defaults to now) */
+  last_seen_at?: string;
+}
+
 // ============================================================================
 // TYPE GUARDS
 // ============================================================================

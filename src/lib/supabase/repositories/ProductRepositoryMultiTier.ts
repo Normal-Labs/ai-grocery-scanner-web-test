@@ -41,11 +41,11 @@ export class ProductRepositoryMultiTier {
     try {
       const supabase = getSupabaseServerClient();
       
-      const { data, error } = await supabase
+      const { data, error } = await (supabase
         .from('products')
         .select('*')
         .eq('barcode', barcode)
-        .maybeSingle();
+        .maybeSingle() as any);
 
       if (error) {
         console.error('[Product Repository] Error finding by barcode:', error);
@@ -58,7 +58,7 @@ export class ProductRepositoryMultiTier {
         console.log(`[Product Repository] ❌ No product found for barcode: ${barcode}`);
       }
 
-      return data;
+      return data as Product | null;
     } catch (error) {
       console.error('[Product Repository] Unexpected error in findByBarcode:', error);
       throw error;
@@ -113,7 +113,7 @@ export class ProductRepositoryMultiTier {
       });
 
       // Call the Supabase function for metadata search
-      const { data, error } = await supabase.rpc('search_products_by_metadata', {
+      const { data, error } = await (supabase.rpc as any)('search_products_by_metadata', {
         p_name: metadata.productName || '',
         p_brand: metadata.brandName || null,
         p_size: metadata.size || null,
@@ -146,11 +146,11 @@ export class ProductRepositoryMultiTier {
       
       console.log('[Product Repository] 💾 Creating product:', data.name);
 
-      const { data: product, error } = await supabase
+      const { data: product, error } = await (supabase
         .from('products')
-        .insert(data)
+        .insert(data as any)
         .select()
-        .single();
+        .single() as any);
 
       if (error) {
         console.error('[Product Repository] Error creating product:', error);
@@ -186,12 +186,12 @@ export class ProductRepositoryMultiTier {
       
       console.log('[Product Repository] 📝 Updating product:', id);
 
-      const { data: product, error } = await supabase
-        .from('products')
+      const { data: product, error } = await ((supabase
+        .from('products') as any)
         .update(data)
         .eq('id', id)
         .select()
-        .single();
+        .single());
 
       if (error) {
         console.error('[Product Repository] Error updating product:', error);
@@ -231,7 +231,7 @@ export class ProductRepositoryMultiTier {
       console.log('[Product Repository] 🔄 Upserting product by barcode:', data.barcode);
 
       // Use the upsert_product function for atomic upsert
-      const { data: result, error } = await supabase.rpc('upsert_product', {
+      const { data: result, error } = await (supabase.rpc as any)('upsert_product', {
         p_barcode: data.barcode || null,
         p_name: data.name,
         p_brand: data.brand,
@@ -277,12 +277,12 @@ export class ProductRepositoryMultiTier {
       
       console.log(`[Product Repository] 🔗 Associating barcode ${barcode} with product ${productId}`);
 
-      const { data: product, error } = await supabase
-        .from('products')
+      const { data: product, error } = await ((supabase
+        .from('products') as any)
         .update({ barcode })
         .eq('id', productId)
         .select()
-        .single();
+        .single());
 
       if (error) {
         console.error('[Product Repository] Error associating barcode:', error);
@@ -321,10 +321,10 @@ export class ProductRepositoryMultiTier {
       
       console.log(`[Product Repository] 🚩 Flagging product ${productId} for review`);
 
-      const { error } = await supabase
-        .from('products')
+      const { error } = await ((supabase
+        .from('products') as any)
         .update({ flagged_for_review: true })
-        .eq('id', productId);
+        .eq('id', productId));
 
       if (error) {
         console.error('[Product Repository] Error flagging product:', error);
