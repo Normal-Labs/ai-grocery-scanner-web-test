@@ -374,7 +374,7 @@ export default function ScanPage() {
                 <>
                   <div className="space-y-3">
                     {history.map((scan, index) => {
-                      const product = scan.results.products[0];
+                      const product = scan.results.products[0] as any; // Type assertion for extended fields
                       return (
                         <div
                           key={scan.timestamp}
