@@ -346,8 +346,12 @@ export class ScanOrchestrator {
           id: '', // Will be empty but scan can continue
           barcode,
           name: cachedInsight.productName,
-          brand: null,
-          last_scanned_at: new Date().toISOString(),
+          brand: 'Unknown',
+          size: null,
+          category: null,
+          image_url: null,
+          metadata: null,
+          flagged_for_review: false,
           created_at: cachedInsight.createdAt.toISOString(),
           updated_at: new Date().toISOString(),
         };
