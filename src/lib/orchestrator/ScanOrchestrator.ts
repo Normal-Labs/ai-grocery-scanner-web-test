@@ -377,8 +377,12 @@ export class ScanOrchestrator {
             id: '',
             barcode,
             name: cachedInsight.productName,
-            brand: null,
-            last_scanned_at: new Date().toISOString(),
+            brand: 'Unknown',
+            size: null,
+            category: null,
+            image_url: null,
+            metadata: null,
+            flagged_for_review: false,
             created_at: cachedInsight.createdAt.toISOString(),
             updated_at: new Date().toISOString(),
           };
@@ -388,10 +392,14 @@ export class ScanOrchestrator {
       // No barcode - create minimal product object
       product = {
         id: '',
-        barcode: '',
+        barcode: null,
         name: cachedInsight.productName,
-        brand: null,
-        last_scanned_at: new Date().toISOString(),
+        brand: 'Unknown',
+        size: null,
+        category: null,
+        image_url: null,
+        metadata: null,
+        flagged_for_review: false,
         created_at: cachedInsight.createdAt.toISOString(),
         updated_at: new Date().toISOString(),
       };
@@ -593,10 +601,14 @@ export class ScanOrchestrator {
       console.log('[ScanOrchestrator] No barcode provided, creating minimal product object');
       product = {
         id: '',
-        barcode: '',
+        barcode: null,
         name: firstProduct.productName,
         brand: this.extractBrand(firstProduct.productName),
-        last_scanned_at: new Date().toISOString(),
+        size: null,
+        category: null,
+        image_url: null,
+        metadata: null,
+        flagged_for_review: false,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       };
