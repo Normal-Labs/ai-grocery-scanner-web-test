@@ -30,6 +30,14 @@ MONGODB_URI=mongodb+srv://username:password@cluster.mongodb.net/database?retryWr
 
 This is used for caching AI-generated insights to reduce API costs.
 
+**Important MongoDB Atlas Setup:**
+1. Create a database user with read/write permissions
+2. **Whitelist Vercel IPs:** Go to Network Access → Add IP Address → "Allow Access from Anywhere" (0.0.0.0/0)
+   - Vercel uses dynamic IPs, so you need to allow all IPs
+   - Alternatively, you can whitelist specific Vercel IP ranges (see Vercel docs)
+3. Make sure your connection string uses `mongodb+srv://` protocol
+4. Include `retryWrites=true&w=majority` in the connection string
+
 ### 3. Google Gemini API (Required)
 
 Get your API key from https://makersuite.google.com/app/apikey
@@ -114,6 +122,28 @@ DIMENSION_ANALYSIS_TIMEOUT_MS=10000
 ### Error: "Missing MONGODB_URI"
 
 **Solution:** Add the `MONGODB_URI` environment variable. The app needs MongoDB for caching AI insights.
+
+### Error: "MongoDB connection failed: certificate validation failed"
+
+**Solution:** This is common in serverless environments. Make sure:
+1. Your MongoDB URI is correct and includes the database name
+2. Your MongoDB cluster allows connections from all IP addresses (0.0.0.0/0) since Vercel uses dynamic IPs
+3. Your MongoDB URI uses the `mongodb+srv://` protocol (not `mongodb://`)
+4. Your connection string includes `retryWrites=true&w=majority`
+
+**Example correct format:**
+```
+mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority
+```
+
+**To allow Vercel connections in MongoDB Atlas:**
+1. Go to MongoDB Atlas dashboard
+2. Click "Network Access" in the left sidebar
+3. Click "Add IP Address"
+4. Click "Allow Access from Anywhere" (0.0.0.0/0)
+5. Click "Confirm"
+
+**Note:** The code now includes TLS settings optimized for serverless environments.
 
 ### Error: "Missing GOOGLE_GENERATIVE_AI_API_KEY"
 

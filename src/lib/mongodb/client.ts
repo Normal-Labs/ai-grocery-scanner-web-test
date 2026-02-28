@@ -69,6 +69,10 @@ export async function getMongoClient(): Promise<Db> {
         // Retry settings for transient failures
         retryWrites: true,
         retryReads: true,
+        // TLS/SSL settings for serverless environments (Vercel, AWS Lambda, etc.)
+        tls: true,
+        tlsAllowInvalidCertificates: false,
+        tlsAllowInvalidHostnames: false,
       });
 
       // Connect to MongoDB
