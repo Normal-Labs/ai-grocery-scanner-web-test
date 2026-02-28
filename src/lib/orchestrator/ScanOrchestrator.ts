@@ -360,6 +360,7 @@ export class ScanOrchestrator {
             async () => await this.productRepo.upsert({
               barcode,
               name: cachedInsight.productName,
+              brand: 'Unknown', // Default brand when creating from cache
             }),
             3,
             1000
