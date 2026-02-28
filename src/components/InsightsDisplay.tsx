@@ -9,7 +9,6 @@
  */
 
 import { AnalysisResult, InsightCategory } from '@/lib/types';
-import SmartBadge from './SmartBadge';
 
 interface InsightsDisplayProps {
   results: AnalysisResult;
@@ -114,7 +113,7 @@ export default function InsightsDisplay({ results, tier = 'premium', dimension, 
             </div>
           )}
 
-          {/* Render SmartBadge for each category */}
+          {/* Render insights for each category */}
           <div className="space-y-3">
             {categoriesToDisplay.map((category) => {
               const insight = product.insights[category];
@@ -122,13 +121,32 @@ export default function InsightsDisplay({ results, tier = 'premium', dimension, 
               // Skip if insight doesn't exist (shouldn't happen with proper validation)
               if (!insight) return null;
               
+              // Map category to display name
+              const categoryLabels: Record<InsightCategory, string> = {
+                health: '🏥 Health',
+                preservatives: '🧪 Preservatives',
+                allergies: '⚠️ Allergies',
+                sustainability: '🌱 Sustainability',
+                carbon: '🌍 Carbon',
+              };
+              
               return (
-                <SmartBadge
+                <div
                   key={category}
-                  category={category}
-                  rating={insight.rating}
-                  explanation={insight.explanation}
-                />
+                  className="p-4 bg-white border-2 border-gray-200 rounded-lg"
+                >
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-semibold text-gray-900">
+                      {categoryLabels[category]}
+                    </span>
+                    <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full font-medium text-sm">
+                      {insight.rating}
+                    </span>
+                  </div>
+                  <p className="text-sm text-gray-600">
+                    {insight.explanation}
+                  </p>
+                </div>
               );
             })}
           </div>
