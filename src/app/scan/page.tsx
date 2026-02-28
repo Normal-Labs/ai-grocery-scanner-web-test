@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
+import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedErrorDisplay';
 
 interface ScanResult {
   success: boolean;
@@ -60,7 +61,7 @@ export default function ScanPage() {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
-  const [error, setError] = useState<string>('');
+  const [error, setError] = useState<ErrorDetails | null>(null);
   const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('free');
 
   const handleScanComplete = async (scanData: {
@@ -69,7 +70,7 @@ export default function ScanPage() {
     imageMimeType?: string;
   }) => {
     setLoading(true);
-    setError('');
+    setError(null);
     setResult(null);
 
     try {
@@ -109,12 +110,29 @@ export default function ScanPage() {
       setResult(data);
 
       if (!data.success) {
-        setError(data.error?.message || 'Scan failed');
+        setError({
+          message: data.error?.message || 'Scan failed',
+          code: data.error?.code,
+          timestamp: new Date(),
+          context: {
+            barcode: scanData.barcode,
+            tier: devUserTier,
+            responseStatus: response.status,
+          },
+        });
       }
     } catch (err) {
       console.error('[Scan Page] ❌ Scan error:', err);
-      const errorMessage = err instanceof Error ? err.message : 'An error occurred';
-      setError(errorMessage);
+      setError({
+        message: err instanceof Error ? err.message : 'An error occurred',
+        timestamp: new Date(),
+        context: {
+          barcode: scanData.barcode,
+          tier: devUserTier,
+          errorType: err instanceof Error ? err.name : 'Unknown',
+        },
+        stack: err instanceof Error ? err.stack : undefined,
+      });
     } finally {
       setLoading(false);
       setScanning(false);
@@ -122,7 +140,14 @@ export default function ScanPage() {
   };
 
   const handleScanError = (errorMessage: string) => {
-    setError(errorMessage);
+    setError({
+      message: errorMessage,
+      timestamp: new Date(),
+      context: {
+        source: 'scanner',
+        tier: devUserTier,
+      },
+    });
     setScanning(false);
   };
 
@@ -206,24 +231,15 @@ export default function ScanPage() {
 
         {/* Error Display */}
         {error && !loading && (
-          <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 mb-6">
-            <div className="flex items-start">
-              <span className="text-2xl mr-3">⚠️</span>
-              <div>
-                <h3 className="font-semibold text-red-900 mb-1">Scan Error</h3>
-                <p className="text-red-800">{error}</p>
-                <button
-                  onClick={() => {
-                    setError('');
-                    setScanning(true);
-                  }}
-                  className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                >
-                  Try Again
-                </button>
-              </div>
-            </div>
-          </div>
+          <DetailedErrorDisplay
+            error={error}
+            title="Scan Error"
+            onRetry={() => {
+              setError(null);
+              setScanning(true);
+            }}
+            onDismiss={() => setError(null)}
+          />
         )}
 
         {/* Result Display */}
