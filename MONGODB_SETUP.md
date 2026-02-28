@@ -83,10 +83,40 @@ mongodb+srv://myuser:mypassword@cluster0.xxxxx.mongodb.net/ai_grocery_scanner?re
 
 **Cause:** TLS/SSL certificate issues in serverless environment
 
-**Solution:** The code has been updated with proper TLS settings. Make sure:
-1. You're using `mongodb+srv://` (not `mongodb://`)
-2. Your connection string includes `retryWrites=true&w=majority`
-3. You've whitelisted 0.0.0.0/0 in Network Access
+**Solution:** 
+1. **Verify you're using `mongodb+srv://`** (not `mongodb://`)
+   ```
+   ✅ mongodb+srv://user:pass@cluster.mongodb.net/db?retryWrites=true&w=majority
+   ❌ mongodb://user:pass@cluster.mongodb.net/db
+   ```
+
+2. **Check Network Access whitelist**:
+   - Go to MongoDB Atlas → Network Access
+   - Make sure 0.0.0.0/0 is in the IP Access List
+   - **Wait 2-3 minutes** after adding for changes to take effect
+
+3. **Verify connection string format**:
+   - Must include database name: `/DATABASE_NAME?`
+   - Must include query parameters: `?retryWrites=true&w=majority`
+   - Example:
+     ```
+     mongodb+srv://myuser:mypass@cluster0.xxxxx.mongodb.net/ai_grocery_scanner?retryWrites=true&w=majority
+     ```
+
+4. **URL-encode special characters in password**:
+   - `@` becomes `%40`
+   - `!` becomes `%21`
+   - `#` becomes `%23`
+   - `:` becomes `%3A`
+   - Use an online URL encoder or:
+     ```javascript
+     encodeURIComponent('your-password')
+     ```
+
+5. **Redeploy after fixing**:
+   - Update environment variable in Vercel
+   - Trigger a new deployment
+   - Check function logs for success message
 
 ### Error: "Authentication failed"
 

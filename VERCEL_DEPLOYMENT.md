@@ -126,24 +126,49 @@ DIMENSION_ANALYSIS_TIMEOUT_MS=10000
 ### Error: "MongoDB connection failed: certificate validation failed"
 
 **Solution:** This is common in serverless environments. Make sure:
-1. Your MongoDB URI is correct and includes the database name
-2. Your MongoDB cluster allows connections from all IP addresses (0.0.0.0/0) since Vercel uses dynamic IPs
-3. Your MongoDB URI uses the `mongodb+srv://` protocol (not `mongodb://`)
-4. Your connection string includes `retryWrites=true&w=majority`
 
-**Example correct format:**
-```
-mongodb+srv://username:password@cluster.mongodb.net/database?retryWrites=true&w=majority
-```
+1. **Use the correct protocol**: Your MongoDB URI MUST use `mongodb+srv://` (not `mongodb://`)
+   ```
+   ✅ mongodb+srv://user:pass@cluster.mongodb.net/db?retryWrites=true&w=majority
+   ❌ mongodb://user:pass@cluster.mongodb.net/db
+   ```
 
-**To allow Vercel connections in MongoDB Atlas:**
-1. Go to MongoDB Atlas dashboard
-2. Click "Network Access" in the left sidebar
-3. Click "Add IP Address"
-4. Click "Allow Access from Anywhere" (0.0.0.0/0)
-5. Click "Confirm"
+2. **Whitelist Vercel IPs in MongoDB Atlas**:
+   - Go to MongoDB Atlas dashboard
+   - Click "Network Access" in the left sidebar
+   - Click "Add IP Address"
+   - Click "Allow Access from Anywhere" (0.0.0.0/0)
+   - Click "Confirm"
+   - **Wait 2-3 minutes** for changes to propagate
 
-**Note:** The code now includes TLS settings optimized for serverless environments.
+3. **Verify your connection string format**:
+   ```
+   mongodb+srv://USERNAME:PASSWORD@CLUSTER.mongodb.net/DATABASE?retryWrites=true&w=majority
+   ```
+   - Replace USERNAME with your database username
+   - Replace PASSWORD with your database password (URL-encode special characters!)
+   - Replace CLUSTER with your cluster name
+   - Replace DATABASE with your database name (e.g., `ai_grocery_scanner`)
+   - Keep `?retryWrites=true&w=majority` at the end
+
+4. **URL-encode special characters in password**:
+   - If your password contains special characters, they must be URL-encoded
+   - Example: `p@ssw0rd!` becomes `p%40ssw0rd%21`
+   - Use an online URL encoder or JavaScript's `encodeURIComponent()`
+
+5. **Check MongoDB Atlas cluster status**:
+   - Make sure your cluster is running (not paused)
+   - Free tier (M0) clusters pause after inactivity
+
+6. **Redeploy after changes**:
+   - After updating environment variables in Vercel, you must redeploy
+   - Go to Vercel dashboard → Deployments → Redeploy
+
+**Still not working?**
+- Check Vercel function logs for the exact error message
+- Verify your MongoDB Atlas user has read/write permissions
+- Try connecting from your local machine first to verify credentials
+- Contact MongoDB Atlas support if the issue persists
 
 ### Error: "Missing GOOGLE_GENERATIVE_AI_API_KEY"
 

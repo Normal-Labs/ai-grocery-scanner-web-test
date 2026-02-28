@@ -12,6 +12,7 @@ Quick reference to all documentation files in this project.
 
 - **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
 - **[MONGODB_SETUP.md](MONGODB_SETUP.md)** - Step-by-step MongoDB Atlas configuration
+- **[MONGODB_TROUBLESHOOTING.md](MONGODB_TROUBLESHOOTING.md)** - Detailed MongoDB connection troubleshooting
 - **[REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)** - Quick reference for critical environment variables
 
 ## System Status

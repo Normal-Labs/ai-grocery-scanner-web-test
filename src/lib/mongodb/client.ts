@@ -59,21 +59,34 @@ export async function getMongoClient(): Promise<Db> {
   try {
     // Create new MongoDB client if not exists
     if (!mongoClientInstance) {
-      mongoClientInstance = new MongoClient(mongoUri, {
+      // Validate MongoDB URI format
+      if (!mongoUri.startsWith('mongodb://') && !mongoUri.startsWith('mongodb+srv://')) {
+        throw new Error(
+          'Invalid MONGODB_URI format. Must start with mongodb:// or mongodb+srv://'
+        );
+      }
+
+      // TLS/SSL configuration for serverless environments
+      const clientOptions: any = {
         // Connection pool settings for optimal performance
         maxPoolSize: 10,
         minPoolSize: 2,
-        // Timeout settings
-        serverSelectionTimeoutMS: 5000,
+        // Timeout settings - increased for serverless cold starts
+        serverSelectionTimeoutMS: 10000,
         socketTimeoutMS: 45000,
+        connectTimeoutMS: 10000,
         // Retry settings for transient failures
         retryWrites: true,
         retryReads: true,
-        // TLS/SSL settings for serverless environments (Vercel, AWS Lambda, etc.)
-        tls: true,
-        tlsAllowInvalidCertificates: false,
-        tlsAllowInvalidHostnames: false,
-      });
+      };
+
+      // Only add TLS options for mongodb+srv:// connections
+      // mongodb+srv:// automatically uses TLS
+      if (mongoUri.startsWith('mongodb+srv://')) {
+        clientOptions.tls = true;
+      }
+
+      mongoClientInstance = new MongoClient(mongoUri, clientOptions);
 
       // Connect to MongoDB
       await mongoClientInstance.connect();
@@ -95,6 +108,24 @@ export async function getMongoClient(): Promise<Db> {
 
     // Provide helpful error message
     if (error instanceof Error) {
+      // Check for specific error types
+      if (error.message.includes('certificate') || error.message.includes('SSL') || error.message.includes('TLS')) {
+        throw new Error(
+          `MongoDB TLS/SSL connection failed: ${error.message}. ` +
+          'Make sure: 1) Your MONGODB_URI uses mongodb+srv:// protocol, ' +
+          '2) Network Access is configured in MongoDB Atlas (whitelist 0.0.0.0/0 for Vercel), ' +
+          '3) Your connection string includes retryWrites=true&w=majority'
+        );
+      }
+      
+      if (error.message.includes('authentication') || error.message.includes('auth')) {
+        throw new Error(
+          `MongoDB authentication failed: ${error.message}. ` +
+          'Please check your username and password in MONGODB_URI. ' +
+          'Special characters in password must be URL-encoded.'
+        );
+      }
+
       throw new Error(
         `MongoDB connection failed: ${error.message}. ` +
         'Please check your MONGODB_URI and network connection.'
