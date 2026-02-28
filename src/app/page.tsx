@@ -426,14 +426,87 @@ export default function ScanPage() {
           <>
         {/* Welcome Message - Show when no scan in progress and no results */}
         {!loading && !result && (
-          <div className="text-center py-12">
-            <div className="text-6xl mb-4">🛒</div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-2">
-              Ready to Scan
-            </h2>
-            <p className="text-gray-600">
-              Tap the Scan button below to identify products
-            </p>
+          <div className="space-y-6">
+            {/* Hero Section */}
+            <div className="text-center py-8">
+              <div className="text-6xl mb-4">🛒</div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-2">
+                AI Grocery Scanner - Beta Testing
+              </h2>
+              <p className="text-gray-600">
+                Help us test product identification and analysis
+              </p>
+            </div>
+
+            {/* How to Analyze Products */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <span>📸</span>
+                <span>How to Analyze Products</span>
+              </h3>
+              <ul className="space-y-3 text-gray-700">
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    <strong>Best results:</strong> Scan a product barcode directly
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    You can also scan the main packaging of a product, including the label
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    You can scan multiple products at the same time
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold flex-shrink-0">💎</span>
+                  <span>
+                    <strong>For best results:</strong> Toggle to Premium mode (top right)
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Testing Instructions */}
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
+              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                <span>🧪</span>
+                <span>Help Us Test</span>
+              </h3>
+              <ol className="space-y-3 text-blue-900">
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">1.</span>
+                  <span>
+                    Take a picture of a <strong>barcode</strong> and wait for results
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">2.</span>
+                  <span>
+                    Take a picture of the <strong>front of the package</strong>, including the product name. 
+                    You should get the same results from cache or the database
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">3.</span>
+                  <span>
+                    If you get any errors, use the <strong>"Copy Error Report"</strong> button and send it back to us
+                  </span>
+                </li>
+              </ol>
+            </div>
+
+            {/* Quick Tips */}
+            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+              <p className="text-sm text-gray-600 text-center">
+                💡 <strong>Tip:</strong> Make sure the barcode or product label is clearly visible and well-lit for best results
+              </p>
+            </div>
           </div>
         )}
 

@@ -494,26 +494,69 @@ export default function ScanPage() {
 
         {/* Info Section */}
         {!result && !loading && !error && (
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-6">
-            <h3 className="font-semibold text-blue-900 mb-2">How it works:</h3>
-            <ul className="space-y-2 text-sm text-blue-800">
-              <li className="flex items-start">
-                <span className="mr-2">1️⃣</span>
-                <span>Take a photo of the product barcode or packaging</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">2️⃣</span>
-                <span>System automatically detects barcodes for instant lookup</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">3️⃣</span>
-                <span>If no barcode, AI analyzes the product image</span>
-              </li>
-              <li className="flex items-start">
-                <span className="mr-2">4️⃣</span>
-                <span>Get product details in seconds!</span>
-              </li>
-            </ul>
+          <div className="mt-6 space-y-4">
+            {/* How to Analyze Products */}
+            <div className="bg-white rounded-lg shadow-lg p-6 border border-gray-200">
+              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <span>📸</span>
+                <span>How to Analyze Products</span>
+              </h3>
+              <ul className="space-y-3 text-gray-700">
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    <strong>Best results:</strong> Scan a product barcode directly
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    You can also scan the main packaging of a product, including the label
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
+                  <span>
+                    You can scan multiple products at the same time
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="text-blue-600 font-bold flex-shrink-0">💎</span>
+                  <span>
+                    <strong>For best results:</strong> Toggle to Premium mode (top right)
+                  </span>
+                </li>
+              </ul>
+            </div>
+
+            {/* Testing Instructions */}
+            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
+              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
+                <span>🧪</span>
+                <span>Help Us Test</span>
+              </h3>
+              <ol className="space-y-3 text-blue-900">
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">1.</span>
+                  <span>
+                    Take a picture of a <strong>barcode</strong> and wait for results
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">2.</span>
+                  <span>
+                    Take a picture of the <strong>front of the package</strong>, including the product name. 
+                    You should get the same results from cache or the database
+                  </span>
+                </li>
+                <li className="flex items-start gap-3">
+                  <span className="font-bold flex-shrink-0">3.</span>
+                  <span>
+                    If you get any errors, use the <strong>"Copy Error Report"</strong> button and send it back to us
+                  </span>
+                </li>
+              </ol>
+            </div>
           </div>
         )}
       </div>
