@@ -256,6 +256,7 @@ export default function ScanPage() {
   const handleLoadHistoryScan = (scan: SavedScan) => {
     // Convert SavedScan back to ScanResult format
     const product = scan.results.products[0] as any; // Type assertion for extended fields
+    const results = scan.results as any; // Type assertion for metadata
     if (product) {
       const scanResult: ScanResult = {
         success: true,
@@ -267,10 +268,10 @@ export default function ScanPage() {
           size: product.size,
           category: product.category || 'Unknown',
         },
-        tier: (scan.results.metadata as any)?.tier || 4,
+        tier: results.metadata?.tier || 4,
         confidenceScore: product.confidence || 0.9,
-        processingTimeMs: (scan.results.metadata as any)?.processingTimeMs || 0,
-        cached: (scan.results.metadata as any)?.cached || false,
+        processingTimeMs: results.metadata?.processingTimeMs || 0,
+        cached: results.metadata?.cached || false,
         // Add dimension analysis if available
         dimensionAnalysis: product.dimensions ? {
           dimensions: product.dimensions as any,
