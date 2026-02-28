@@ -244,15 +244,17 @@ export class DiscoveryService {
 
         console.log(`[Discovery Service] 💾 Saved product: ${savedProduct.id}`);
 
-        // Step 2: Update cache with barcode
-        await cacheService.store(
-          productData.barcode,
-          'barcode',
-          productData,
-          3, // tier 3
-          productData.metadata?.confidence || 0.7
-        );
-        barcodeCached = true;
+        // Step 2: Update cache with barcode (barcode should exist since we just discovered it)
+        if (productData.barcode) {
+          await cacheService.store(
+            productData.barcode,
+            'barcode',
+            productData,
+            3, // tier 3
+            productData.metadata?.confidence || 0.7
+          );
+          barcodeCached = true;
+        }
 
         // Step 3: Also cache by image hash if available
         if (imageHash) {
