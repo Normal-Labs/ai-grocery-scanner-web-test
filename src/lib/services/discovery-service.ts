@@ -83,7 +83,7 @@ export class DiscoveryService {
         brand: bestResult.brand || metadata.brandName || 'Unknown Brand',
         size: metadata.size,
         category: bestResult.category || metadata.category || 'Unknown',
-        imageUrl: metadata.imageUrl,
+        imageUrl: undefined, // No image URL from metadata
         metadata: {
           ...metadata,
           discoveredBarcode: true,
