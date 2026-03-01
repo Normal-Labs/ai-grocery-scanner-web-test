@@ -127,7 +127,7 @@ const COLOR_PATTERNS: RegExp[] = [
  */
 export class IngredientParser {
   private apiKey: string;
-  private model: string = 'gemini-2.0-flash-exp';
+  private model: string = 'gemini-2.0-flash'; // Same model as GeminiClient
   private readonly CONFIDENCE_THRESHOLD = 0.7; // Threshold for incomplete list flagging
 
   constructor(apiKey?: string) {
@@ -371,8 +371,11 @@ Example:
    * @returns Array of ingredient names in order
    */
   private tokenizeIngredients(rawText: string): string[] {
+    // Strip "INGREDIENTS:" prefix if present (case-insensitive)
+    let cleanedText = rawText.replace(/^INGREDIENTS:\s*/i, '');
+    
     // Split by commas and semicolons
-    const tokens = rawText.split(/[,;]+/);
+    const tokens = cleanedText.split(/[,;]+/);
 
     // Clean up each token (trim whitespace, remove empty strings)
     const cleanedTokens = tokens

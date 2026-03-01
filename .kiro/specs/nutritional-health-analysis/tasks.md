@@ -288,13 +288,13 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - _Requirements: 2.1-2.10, 3.1-3.8, 4.1-4.12, 5.5, 6.1-6.6, 8.1-8.5_
 
 - [ ] 11. Phase 4: API Layer - Routing Integration
-  - [~] 11.1 Integrate classification into existing scan workflow
+  - [x] 11.1 Integrate classification into existing scan workflow
     - Update scan page/hook to call classify-image first
     - Route to appropriate pipeline based on classification type
     - Barcode → existing barcode flow, product_image → existing product flow, nutrition_label → new nutrition flow
     - _Requirements: 5.1, 5.2, 5.3, 5.4_
   
-  - [~] 11.2 Add unified scan history storage
+  - [x] 11.2 Add unified scan history storage
     - Store all scan types in scan_history collection
     - Include scanType field for filtering
     - _Requirements: 5.6_

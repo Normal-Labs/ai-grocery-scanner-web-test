@@ -99,6 +99,7 @@ export default function ScanPage() {
     image?: string;
     imageMimeType?: string;
   }) => {
+    const startTime = Date.now(); // Track start time
     setLoading(true);
     setError(null);
     setResult(null);
@@ -114,10 +115,167 @@ export default function ScanPage() {
     }, 30000);
 
     try {
-      console.log('[Scan Page] 📤 Sending scan request:', {
+      console.log('[Scan Page] 📤 Starting scan workflow:', {
         hasBarcode: !!scanData.barcode,
         hasImage: !!scanData.image,
       });
+
+      // Step 1: Classify the image if we have one
+      let imageType: 'barcode' | 'product_image' | 'nutrition_label' | 'unknown' = 'unknown';
+      let classification: any = null;
+      
+      if (scanData.image) {
+        console.log('[Scan Page] 🔍 Classifying image...');
+        
+        const classifyResponse = await fetch('/api/classify-image', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            imageData: scanData.image,
+            tier: devUserTier,
+          }),
+        });
+
+        if (classifyResponse.ok) {
+          const classifyResult = await classifyResponse.json();
+          if (classifyResult.success && classifyResult.data) {
+            classification = classifyResult.data;
+            imageType = classification.type;
+            console.log('[Scan Page] ✅ Image classified as:', imageType, 'confidence:', classification.confidence);
+            console.log('[Scan Page] 📋 Metadata:', classification.metadata);
+          } else {
+            console.warn('[Scan Page] ⚠️ Classification response missing data, defaulting to product flow');
+            imageType = 'product_image';
+          }
+        } else {
+          console.warn('[Scan Page] ⚠️ Classification failed, defaulting to product flow');
+          imageType = 'product_image';
+        }
+      } else if (scanData.barcode) {
+        // If we only have a barcode, treat it as barcode type
+        imageType = 'barcode';
+      }
+
+      // Step 2: Route to appropriate endpoint based on classification
+      const hasNutritionalFacts = classification?.metadata?.hasNutritionalFacts === true;
+      const shouldRouteToNutrition = imageType === 'nutrition_label' || (hasNutritionalFacts && scanData.image);
+      
+      console.log('[Scan Page] 🔀 Routing decision:', {
+        imageType,
+        hasNutritionalFacts,
+        shouldRouteToNutrition,
+        classificationMetadata: classification?.metadata,
+      });
+      
+      if (shouldRouteToNutrition) {
+        console.log('[Scan Page] 🥗 Routing to nutrition analysis...');
+        
+        // Add progress steps for nutrition analysis
+        setProgressSteps([
+          {
+            type: 'classification',
+            message: 'Image classified as nutrition label',
+            timestamp: Date.now(),
+          },
+          {
+            type: 'cache_check',
+            message: 'Checking for cached nutrition data...',
+            timestamp: Date.now(),
+          },
+        ]);
+        
+        // Simulate progress updates while waiting for response
+        const progressInterval = setInterval(() => {
+          setProgressSteps(prev => {
+            const lastStep = prev[prev.length - 1];
+            if (lastStep?.type === 'cache_check') {
+              return [...prev, {
+                type: 'ocr_processing',
+                message: 'Extracting text from nutrition label...',
+                timestamp: Date.now(),
+              }];
+            } else if (lastStep?.type === 'ocr_processing') {
+              return [...prev, {
+                type: 'nutrition_parsing',
+                message: 'Parsing nutritional facts...',
+                timestamp: Date.now(),
+              }];
+            } else if (lastStep?.type === 'nutrition_parsing') {
+              return [...prev, {
+                type: 'ingredient_parsing',
+                message: 'Analyzing ingredients and allergens...',
+                timestamp: Date.now(),
+              }];
+            } else if (lastStep?.type === 'ingredient_parsing') {
+              return [...prev, {
+                type: 'health_scoring',
+                message: 'Calculating health score...',
+                timestamp: Date.now(),
+              }];
+            }
+            return prev;
+          });
+        }, 1500); // Update every 1.5 seconds
+        
+        try {
+          const response = await fetch('/api/analyze-nutrition', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              imageData: scanData.image,
+              userId: 'user-' + Date.now(),
+              sessionId: 'session-' + Date.now(),
+              tier: devUserTier,
+            }),
+          });
+
+          clearInterval(progressInterval); // Stop progress simulation
+
+          const data = await response.json();
+          
+          // Add final progress step
+          setProgressSteps(prev => [...prev, {
+            type: 'complete',
+            message: 'Analysis complete!',
+            timestamp: Date.now(),
+          }]);
+          
+          // Transform nutrition response to match ScanResult interface
+          if (data.success) {
+            // Create a result that matches the ScanResult interface
+            const nutritionResult: ScanResult = {
+              success: true,
+              product: {
+                id: 'nutrition-' + Date.now(),
+                name: data.data.productName || 'Nutrition Label',
+                brand: 'Unknown',
+                category: 'Food',
+              },
+              tier: 4,
+              confidenceScore: 0.95,
+              processingTimeMs: Date.now() - startTime,
+              cached: data.data.fromCache,
+              dimensionStatus: 'skipped',
+              userTier: devUserTier,
+              availableDimensions: [],
+            };
+            
+            setResult(nutritionResult);
+            console.log('[Scan Page] 📥 Nutrition analysis complete:', nutritionResult);
+            return; // Exit early, don't continue to product scan
+          }
+        } catch (error) {
+          clearInterval(progressInterval); // Stop progress simulation on error
+          throw error; // Re-throw to be caught by outer try-catch
+        }
+      }
+
+      // Step 3: Continue with existing product scan flow
+      console.log('[Scan Page] 📦 Routing to product scan...');
 
       // Prepare request body
       const body: any = {

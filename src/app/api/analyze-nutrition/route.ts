@@ -13,6 +13,8 @@ import { NutritionParser } from '@/lib/services/nutrition-parser';
 import { IngredientParser } from '@/lib/services/ingredient-parser';
 import { HealthScorer } from '@/lib/services/health-scorer';
 import { nutritionCacheRepository } from '@/lib/mongodb/nutrition-cache';
+import { scanHistoryRepository } from '@/lib/mongodb/scan-history';
+import { hashImage } from '@/lib/imageHash';
 
 /**
  * Rate limiting configuration
@@ -251,7 +253,115 @@ export async function POST(request: NextRequest) {
       timestamp: new Date().toISOString(),
     });
     
-    // Step 5: Return result
+    // Step 5: Store/update product in Supabase with nutrition data
+    try {
+      const { getSupabaseServerClient } = await import('@/lib/supabase/server-client');
+      const supabase = getSupabaseServerClient();
+      
+      // Try to find existing product by name (fuzzy match)
+      // or create a new one
+      const productName = result.productName || 'Unknown Product';
+      
+      // Prepare nutrition data for Supabase
+      const nutritionData = {
+        servingSize: {
+          amount: result.nutritionalFacts.servingSize.amount,
+          unit: result.nutritionalFacts.servingSize.unit,
+        },
+        calories: result.nutritionalFacts.calories.value,
+        macros: {
+          fat: result.nutritionalFacts.totalFat.value,
+          saturatedFat: result.nutritionalFacts.saturatedFat.value,
+          transFat: result.nutritionalFacts.transFat.value,
+          carbs: result.nutritionalFacts.totalCarbohydrates.value,
+          fiber: result.nutritionalFacts.dietaryFiber.value,
+          sugars: result.nutritionalFacts.totalSugars.value,
+          protein: result.nutritionalFacts.protein.value,
+        },
+        sodium: result.nutritionalFacts.sodium.value,
+        lastUpdated: new Date().toISOString(),
+      };
+      
+      // Deduplicate allergen types
+      const allergenTypes = Array.from(new Set(
+        result.ingredients.allergens.map((a: any) => 
+          a.allergenType?.replace('_', ' ') || 'unknown'
+        )
+      ));
+      
+      // Check if product exists
+      const { data: existingProducts } = await (supabase
+        .from('products') as any)
+        .select('id, name')
+        .ilike('name', `%${productName}%`)
+        .limit(1);
+      
+      if (existingProducts && existingProducts.length > 0) {
+        // Update existing product
+        const productId = existingProducts[0].id;
+        
+        await (supabase.from('products') as any)
+          .update({
+            nutrition_data: nutritionData,
+            health_score: result.healthScore.overall,
+            has_allergens: allergenTypes.length > 0,
+            allergen_types: allergenTypes,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', productId);
+        
+        console.log('[Analyze Nutrition API] ✅ Updated existing product in Supabase:', productId);
+      } else {
+        // Create new product
+        const { data: newProduct } = await (supabase.from('products') as any)
+          .insert({
+            name: productName,
+            brand: 'Unknown', // We don't extract brand from nutrition labels
+            category: 'Food', // Default category
+            nutrition_data: nutritionData,
+            health_score: result.healthScore.overall,
+            has_allergens: allergenTypes.length > 0,
+            allergen_types: allergenTypes,
+          })
+          .select('id')
+          .single();
+        
+        console.log('[Analyze Nutrition API] ✅ Created new product in Supabase:', newProduct?.id);
+      }
+    } catch (supabaseError) {
+      // Don't fail the request if Supabase update fails
+      console.error('[Analyze Nutrition API] ⚠️  Failed to update Supabase:', supabaseError);
+    }
+    
+    // Step 6: Store scan in history
+    try {
+      const imageHash = await hashImage(imageData);
+      
+      await scanHistoryRepository.addScan({
+        userId,
+        sessionId: body.sessionId || `session-${Date.now()}`,
+        scanType: 'nutrition',
+        timestamp: new Date(),
+        productName: result.productName,
+        imageHash,
+        nutritionData: {
+          healthScore: result.healthScore.overall,
+          category: result.healthScore.category,
+          hasAllergens: result.ingredients.allergens.length > 0,
+          allergenTypes: result.ingredients.allergens.map((a: any) => a.allergenType || 'unknown'),
+        },
+        tier,
+        cached: result.fromCache,
+        processingTimeMs: duration,
+      });
+      
+      console.log('[Analyze Nutrition API] ✅ Scan stored in history');
+    } catch (historyError) {
+      // Don't fail the request if history storage fails
+      console.error('[Analyze Nutrition API] ⚠️  Failed to store scan history:', historyError);
+    }
+    
+    // Step 7: Return result
     return NextResponse.json(
       {
         success: true,

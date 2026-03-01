@@ -95,7 +95,7 @@ export interface ValidationResult {
  */
 export class NutritionParser {
   private apiKey: string;
-  private model: string = 'gemini-2.0-flash-exp';
+  private model: string = 'gemini-2.0-flash'; // Same model as GeminiClient
   private readonly CONFIDENCE_THRESHOLD = 0.8; // Requirement 2.9
   private readonly CALORIE_TOLERANCE = 0.2; // ±20% for calorie validation (Requirement 10.1)
 

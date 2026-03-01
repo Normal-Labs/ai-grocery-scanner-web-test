@@ -520,21 +520,48 @@ export class NutritionOrchestrator {
   /**
    * Extract product name from ingredient list
    * 
-   * Attempts to extract a product name from the first ingredient or returns undefined.
-   * This is a simple heuristic that could be enhanced with more sophisticated NLP.
+   * Attempts to extract a product name from the raw ingredient text.
+   * Looks for common patterns like "INGREDIENTS:" prefix and extracts a meaningful name.
    * 
    * @param ingredients - Parsed ingredient list
    * @returns Extracted product name or undefined
    */
   private extractProductName(ingredients: IngredientList): string | undefined {
-    // Simple heuristic: use first ingredient as product name hint
-    // This could be enhanced with actual product name OCR from the label
-    if (ingredients.ingredients.length > 0) {
-      const firstIngredient = ingredients.ingredients[0].name;
-      // Capitalize first letter
-      return firstIngredient.charAt(0).toUpperCase() + firstIngredient.slice(1);
+    // Check if raw text starts with "INGREDIENTS:" pattern and strip it
+    let rawText = ingredients.rawText;
+    
+    // Strip "INGREDIENTS:" prefix if present
+    rawText = rawText.replace(/^INGREDIENTS:\s*/i, '');
+    
+    // Pattern 1: If we have multiple ingredients, create a descriptive name from first 2 ingredients
+    if (ingredients.ingredients.length >= 2) {
+      const firstTwo = ingredients.ingredients.slice(0, 2).map(i => i.name);
+      // Create a descriptive name like "Whole Wheat & Fig Paste Product"
+      const descriptiveName = firstTwo.join(' & ');
+      return this.capitalizeProductName(descriptiveName) + ' Product';
     }
+    
+    // Pattern 2: Single ingredient - use it as base
+    if (ingredients.ingredients.length === 1) {
+      const ingredient = ingredients.ingredients[0].name;
+      return this.capitalizeProductName(ingredient) + ' Product';
+    }
+    
+    // Fallback: return undefined to use "Unknown Product"
     return undefined;
+  }
+  
+  /**
+   * Capitalize product name properly
+   * 
+   * @param name - Raw product name
+   * @returns Properly capitalized product name
+   */
+  private capitalizeProductName(name: string): string {
+    return name
+      .split(' ')
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
   }
 
   /**

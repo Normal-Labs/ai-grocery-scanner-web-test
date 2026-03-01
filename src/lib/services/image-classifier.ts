@@ -36,7 +36,7 @@ export interface ImageClassification {
  */
 export class ImageClassifier {
   private apiKey: string;
-  private model: string = 'gemini-2.0-flash-exp';
+  private model: string = 'gemini-2.0-flash'; // Same model as GeminiClient
   private readonly CONFIDENCE_THRESHOLD = 0.6; // Requirement 1.7
   
   // In-memory cache for classification results
@@ -124,53 +124,77 @@ export class ImageClassifier {
   private async classifyWithoutCache(imageData: string): Promise<ImageClassification> {
     console.log('[ImageClassifier] 🔍 Classifying image...');
 
-    // Ensure imageData has proper data URI format
-    const imageDataUrl = imageData.startsWith('data:') 
-      ? imageData 
-      : `data:image/jpeg;base64,${imageData}`;
+    try {
+      // Ensure imageData has proper data URI format
+      const imageDataUrl = imageData.startsWith('data:') 
+        ? imageData 
+        : `data:image/jpeg;base64,${imageData}`;
 
-    // Construct classification prompt
-    const prompt = this.buildClassificationPrompt();
+      // Construct classification prompt
+      const prompt = this.buildClassificationPrompt();
 
-    // Call Gemini Vision API
-    const result = await generateText({
-      model: google(this.model),
-      temperature: 0.1, // Low temperature for consistent classification
-      messages: [
-        {
-          role: 'user',
-          content: [
+      console.log('[ImageClassifier] 📤 Calling Gemini Vision API...');
+      console.log('[ImageClassifier] Model:', this.model);
+      console.log('[ImageClassifier] Image data length:', imageDataUrl.length);
+
+      // Call Gemini Vision API with error handling
+      let result;
+      try {
+        result = await generateText({
+          model: google(this.model),
+          temperature: 0.1, // Low temperature for consistent classification
+          messages: [
             {
-              type: 'text',
-              text: prompt,
-            },
-            {
-              type: 'image',
-              image: imageDataUrl,
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: prompt,
+                },
+                {
+                  type: 'image',
+                  image: imageDataUrl,
+                },
+              ],
             },
           ],
-        },
-      ],
-    });
+        });
+      } catch (apiError) {
+        console.error('[ImageClassifier] ❌ Gemini API call failed:', apiError);
+        if (apiError instanceof Error) {
+          console.error('[ImageClassifier] Error name:', apiError.name);
+          console.error('[ImageClassifier] Error message:', apiError.message);
+          if ('cause' in apiError) {
+            console.error('[ImageClassifier] Error cause:', apiError.cause);
+          }
+        }
+        throw new Error(`Gemini API call failed: ${apiError instanceof Error ? apiError.message : String(apiError)}`);
+      }
 
-    const responseText = result.text;
-    
-    // Parse JSON response
-    const classification = this.parseClassificationResponse(responseText);
+      console.log('[ImageClassifier] ✅ Received response from Gemini');
+      const responseText = result.text;
+      console.log('[ImageClassifier] Response length:', responseText.length);
+      
+      // Parse JSON response
+      const classification = this.parseClassificationResponse(responseText);
 
-    console.log(`[ImageClassifier] Type: ${classification.type}, Confidence: ${classification.confidence}`);
+      console.log(`[ImageClassifier] Type: ${classification.type}, Confidence: ${classification.confidence}`);
 
-    // Requirement 1.7: Return "unknown" if confidence below threshold
-    if (classification.confidence < this.CONFIDENCE_THRESHOLD) {
-      console.log(`[ImageClassifier] ⚠️  Confidence ${classification.confidence} below threshold ${this.CONFIDENCE_THRESHOLD}, returning "unknown"`);
-      return {
-        type: 'unknown',
-        confidence: classification.confidence,
-        metadata: classification.metadata,
-      };
+      // Requirement 1.7: Return "unknown" if confidence below threshold
+      if (classification.confidence < this.CONFIDENCE_THRESHOLD) {
+        console.log(`[ImageClassifier] ⚠️  Confidence ${classification.confidence} below threshold ${this.CONFIDENCE_THRESHOLD}, returning "unknown"`);
+        return {
+          type: 'unknown',
+          confidence: classification.confidence,
+          metadata: classification.metadata,
+        };
+      }
+
+      return classification;
+    } catch (error) {
+      console.error('[ImageClassifier] ❌ Classification failed in classifyWithoutCache:', error);
+      throw error;
     }
-
-    return classification;
   }
 
   /**

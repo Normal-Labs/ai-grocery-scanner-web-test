@@ -17,6 +17,7 @@ import { hashImage } from '@/lib/imageHash';
 import { ScanRequest, ImageData } from '@/lib/types/multi-tier';
 import { progressManager } from '@/lib/progress/ProgressManager';
 import { ProgressEmitter } from '@/lib/progress/ProgressEmitter';
+import { scanHistoryRepository } from '@/lib/mongodb/scan-history';
 
 /**
  * POST /api/scan-multi-tier
@@ -174,6 +175,31 @@ export async function POST(request: NextRequest) {
       const result = await integrationLayer.processScan(scanRequest, skipDimensionAnalysis);
 
       const totalTime = Date.now() - startTime;
+
+    // Store scan in history
+    if (result.success && result.product) {
+      try {
+        await scanHistoryRepository.addScan({
+          userId,
+          sessionId,
+          scanType: barcode ? 'barcode' : 'product',
+          timestamp: new Date(),
+          productId: result.product.id,
+          productName: result.product.name,
+          productBrand: result.product.brand,
+          imageHash,
+          barcode: result.product.barcode,
+          tier: devUserTier || 'free',
+          cached: result.cached,
+          processingTimeMs: totalTime,
+        });
+        
+        console.log('[Scan API Multi-Tier] ✅ Scan stored in history');
+      } catch (historyError) {
+        // Don't fail the request if history storage fails
+        console.error('[Scan API Multi-Tier] ⚠️  Failed to store scan history:', historyError);
+      }
+    }
 
     // Requirement 6.7: Update scan log with dimension analysis fields
     if (result.success && result.product) {

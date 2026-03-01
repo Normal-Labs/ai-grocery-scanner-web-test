@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0-nutrition-routing",
+  "timestamp": "2026-03-01T18:00:00Z",
+  "features": [
+    "Image classification before routing",
+    "Nutrition label detection",
+    "Automatic routing to nutrition analysis",
+    "Supabase nutrition data storage"
+  ],
+  "expectedLogs": [
+    "[Scan Page] 📤 Starting scan workflow:",
+    "[Scan Page] 🔍 Classifying image...",
+    "[Scan Page] ✅ Image classified as:",
+    "[Scan Page] 🔀 Routing decision:",
+    "[Scan Page] 🥗 Routing to nutrition analysis..."
+  ]
+}

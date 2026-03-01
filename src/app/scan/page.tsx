@@ -13,6 +13,7 @@ import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedEr
 
 interface ScanResult {
   success: boolean;
+  scanType?: 'product' | 'nutrition';
   product?: {
     id: string;
     name: string;
@@ -47,6 +48,21 @@ interface ScanResult {
   userTier?: 'free' | 'premium';
   availableDimensions?: string[];
   upgradePrompt?: string;
+  // Nutrition analysis fields
+  nutritionData?: {
+    healthScore: number;
+    category: 'excellent' | 'good' | 'fair' | 'poor' | 'very_poor';
+    nutritionalFacts: any;
+    ingredients: {
+      rawText: string;
+      ingredients: any[];
+      allergens: any[];
+      preservatives: any[];
+      sweeteners: any[];
+      artificialColors: any[];
+    };
+    explanation: string;
+  };
 }
 
 interface DimensionScore {
@@ -74,39 +90,124 @@ export default function ScanPage() {
     setResult(null);
 
     try {
-      console.log('[Scan Page] 📤 Sending scan request:', {
+      console.log('[Scan Page] 📤 Starting scan workflow:', {
         hasBarcode: !!scanData.barcode,
         hasImage: !!scanData.image,
       });
 
-      // Prepare request body
-      const body: any = {
-        userId: 'user-' + Date.now(), // In production, use actual user ID
-        sessionId: 'session-' + Date.now(),
-        devUserTier, // Add tier toggle
-      };
-
-      if (scanData.barcode) {
-        body.barcode = scanData.barcode;
-      }
-
+      // Step 1: Classify the image if we have one
+      let imageType: 'barcode' | 'product_image' | 'nutrition_label' | 'unknown' = 'unknown';
+      let classification: any = null;
+      
       if (scanData.image) {
-        body.image = scanData.image;
-        body.imageMimeType = scanData.imageMimeType || 'image/jpeg';
+        console.log('[Scan Page] 🔍 Classifying image...');
+        
+        const classifyResponse = await fetch('/api/classify-image', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            imageData: scanData.image,
+            tier: devUserTier,
+          }),
+        });
+
+        if (classifyResponse.ok) {
+          const classifyResult = await classifyResponse.json();
+          if (classifyResult.success && classifyResult.data) {
+            classification = classifyResult.data;
+            imageType = classification.type;
+            console.log('[Scan Page] ✅ Image classified as:', imageType, 'confidence:', classification.confidence);
+            console.log('[Scan Page] 📋 Metadata:', classification.metadata);
+          } else {
+            console.warn('[Scan Page] ⚠️ Classification response missing data, defaulting to product flow');
+            imageType = 'product_image';
+          }
+        } else {
+          console.warn('[Scan Page] ⚠️ Classification failed, defaulting to product flow');
+          imageType = 'product_image';
+        }
+      } else if (scanData.barcode) {
+        // If we only have a barcode, treat it as barcode type
+        imageType = 'barcode';
       }
 
-      // Call multi-tier scan API
-      const response = await fetch('/api/scan-multi-tier', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
+      // Step 2: Route to appropriate endpoint based on classification
+      let response: Response;
+      let data: any;
+
+      // Route to nutrition analysis if:
+      // 1. Image is classified as nutrition_label, OR
+      // 2. Image has nutritional facts visible (even if classified as product_image)
+      const hasNutritionalFacts = classification?.metadata?.hasNutritionalFacts === true;
+      const shouldRouteToNutrition = imageType === 'nutrition_label' || (hasNutritionalFacts && scanData.image);
+      
+      console.log('[Scan Page] 🔀 Routing decision:', {
+        imageType,
+        hasNutritionalFacts,
+        shouldRouteToNutrition,
+        classificationMetadata: classification?.metadata,
       });
+      
+      if (shouldRouteToNutrition) {
+        console.log('[Scan Page] 🥗 Routing to nutrition analysis...');
+        
+        response = await fetch('/api/analyze-nutrition', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            imageData: scanData.image,
+            userId: 'user-' + Date.now(),
+            tier: devUserTier,
+          }),
+        });
 
-      const data = await response.json();
+        data = await response.json();
+        
+        // Transform nutrition response to match ScanResult interface
+        if (data.success) {
+          data.scanType = 'nutrition';
+          data.tier = 4; // Nutrition analysis is always tier 4 (AI)
+        }
+        
+      } else {
+        // Route to existing product/barcode scan flow
+        console.log('[Scan Page] 📦 Routing to product scan...');
+        
+        const body: any = {
+          userId: 'user-' + Date.now(),
+          sessionId: 'session-' + Date.now(),
+          devUserTier,
+        };
+
+        if (scanData.barcode) {
+          body.barcode = scanData.barcode;
+        }
+
+        if (scanData.image) {
+          body.image = scanData.image;
+          body.imageMimeType = scanData.imageMimeType || 'image/jpeg';
+        }
+
+        response = await fetch('/api/scan-multi-tier', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(body),
+        });
+
+        data = await response.json();
+        
+        if (data.success) {
+          data.scanType = 'product';
+        }
+      }
+
       console.log('[Scan Page] 📥 Scan result:', data);
-
       setResult(data);
 
       if (!data.success) {
@@ -117,6 +218,7 @@ export default function ScanPage() {
           context: {
             barcode: scanData.barcode,
             tier: devUserTier,
+            imageType,
             responseStatus: response.status,
           },
         });
@@ -447,6 +549,190 @@ export default function ScanPage() {
                       Product was identified successfully, but dimension analysis failed. 
                       This may be due to API rate limits. Try again in a moment.
                     </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Nutrition Analysis Results */}
+            {result.scanType === 'nutrition' && result.nutritionData && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    🥗 Nutritional Health Analysis
+                  </h3>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    result.cached 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {result.cached ? '💾 Cached' : '🤖 Fresh'}
+                  </span>
+                </div>
+
+                {/* Health Score Badge */}
+                <div className="mb-6 p-6 bg-gradient-to-br from-blue-50 to-purple-50 rounded-lg border-2 border-blue-200">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-gray-600 mb-1">Health Score</p>
+                      <p className="text-4xl font-bold text-gray-900">
+                        {result.nutritionData.healthScore}
+                        <span className="text-lg text-gray-500">/100</span>
+                      </p>
+                    </div>
+                    <div className={`px-6 py-3 rounded-full font-bold text-lg ${
+                      result.nutritionData.category === 'excellent' ? 'bg-green-500 text-white' :
+                      result.nutritionData.category === 'good' ? 'bg-green-400 text-white' :
+                      result.nutritionData.category === 'fair' ? 'bg-yellow-400 text-gray-900' :
+                      result.nutritionData.category === 'poor' ? 'bg-orange-500 text-white' :
+                      'bg-red-500 text-white'
+                    }`}>
+                      {result.nutritionData.category.charAt(0).toUpperCase() + result.nutritionData.category.slice(1).replace('_', ' ')}
+                    </div>
+                  </div>
+                  <p className="mt-4 text-sm text-gray-700">
+                    {result.nutritionData.explanation}
+                  </p>
+                </div>
+
+                {/* Allergen Warning */}
+                {result.nutritionData.ingredients.allergens.length > 0 && (
+                  <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg">
+                    <div className="flex items-start">
+                      <span className="text-2xl mr-3">⚠️</span>
+                      <div>
+                        <h4 className="font-semibold text-red-900 mb-2">
+                          Contains Allergens
+                        </h4>
+                        <div className="flex flex-wrap gap-2">
+                          {result.nutritionData.ingredients.allergens.map((allergen: any, idx: number) => (
+                            <span
+                              key={idx}
+                              className="px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium"
+                            >
+                              {allergen.allergenType?.replace('_', ' ')}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Nutritional Facts */}
+                <div className="mb-4">
+                  <h4 className="font-semibold text-gray-900 mb-3">Nutritional Facts</h4>
+                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span className="text-gray-600">Serving Size:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.servingSize.amount}
+                          {result.nutritionData.nutritionalFacts.servingSize.unit}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Calories:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.calories.value}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Total Fat:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.totalFat.value}g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Saturated Fat:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.saturatedFat.value}g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Sodium:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.sodium.value}mg
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Total Carbs:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.totalCarbohydrates.value}g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Fiber:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.dietaryFiber.value}g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Sugars:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.totalSugars.value}g
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-gray-600">Protein:</span>
+                        <span className="ml-2 font-semibold">
+                          {result.nutritionData.nutritionalFacts.protein.value}g
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Ingredients List */}
+                <div>
+                  <h4 className="font-semibold text-gray-900 mb-3">Ingredients</h4>
+                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.nutritionData.ingredients.ingredients.map((ing: any, idx: number) => {
+                        const isLastIngredient = idx === result.nutritionData!.ingredients.ingredients.length - 1;
+                        return (
+                          <span
+                            key={idx}
+                            className={
+                              ing.isAllergen ? 'text-red-600 font-semibold' :
+                              ing.isPreservative || ing.isSweetener || ing.isArtificialColor ? 'text-orange-600' :
+                              'text-gray-700'
+                            }
+                          >
+                            {ing.name}
+                            {!isLastIngredient ? ', ' : ''}
+                          </span>
+                        );
+                      })}
+                    </p>
+                    
+                    {/* Additives Warning */}
+                    {(result.nutritionData.ingredients.preservatives.length > 0 ||
+                      result.nutritionData.ingredients.sweeteners.length > 0 ||
+                      result.nutritionData.ingredients.artificialColors.length > 0) && (
+                      <div className="mt-3 pt-3 border-t border-gray-300">
+                        <p className="text-xs text-orange-700 font-medium mb-2">
+                          ⚠️ Contains additives:
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {result.nutritionData.ingredients.preservatives.map((p: any, idx: number) => (
+                            <span key={`p-${idx}`} className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
+                              {p.preservativeType}
+                            </span>
+                          ))}
+                          {result.nutritionData.ingredients.sweeteners.map((s: any, idx: number) => (
+                            <span key={`s-${idx}`} className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
+                              {s.sweetenerType}
+                            </span>
+                          ))}
+                          {result.nutritionData.ingredients.artificialColors.map((c: any, idx: number) => (
+                            <span key={`c-${idx}`} className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs">
+                              {c.colorType}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

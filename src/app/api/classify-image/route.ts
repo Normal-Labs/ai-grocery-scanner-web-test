@@ -201,7 +201,21 @@ export async function POST(request: NextRequest) {
     // Step 4: Classify image
     console.log('[Classify Image API] 🔍 Classifying image...');
     
-    const classifier = new ImageClassifier();
+    // Check if API key is available
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    if (!apiKey) {
+      console.error('[Classify Image API] ❌ Missing Gemini API key');
+      console.error('[Classify Image API] Available env vars:', Object.keys(process.env).filter(k => k.includes('GEMINI') || k.includes('GOOGLE')));
+      return NextResponse.json(
+        {
+          success: false,
+          error: 'Image classification service is not configured. Please contact support.'
+        },
+        { status: 500 }
+      );
+    }
+    
+    const classifier = new ImageClassifier(apiKey);
     const classification = await classifier.classify(imageData);
     
     const duration = Date.now() - startTime;
@@ -231,6 +245,15 @@ export async function POST(request: NextRequest) {
       duration,
       timestamp: new Date().toISOString(),
     });
+    
+    // Log more details for debugging
+    if (error instanceof Error) {
+      console.error('[Classify Image API] Error name:', error.name);
+      console.error('[Classify Image API] Error message:', error.message);
+      if (error.stack) {
+        console.error('[Classify Image API] Stack trace:', error.stack.split('\n').slice(0, 5).join('\n'));
+      }
+    }
     
     // Return user-friendly error message
     return NextResponse.json(
