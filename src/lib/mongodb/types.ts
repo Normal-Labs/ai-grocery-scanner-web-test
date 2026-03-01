@@ -141,3 +141,28 @@ export interface ScanHistoryResult {
   limit: number;
   offset: number;
 }
+
+/**
+ * Multi-image session document stored in MongoDB
+ * Tracks multi-image capture sessions with 30-minute TTL
+ * 
+ * Requirements: 3.1, 3.2, 3.3, 12.1, 12.2
+ */
+export interface MultiImageSessionDocument {
+  _id?: ObjectId;
+  sessionId: string; // UUID
+  userId: string; // Supabase Auth user ID
+  productId: string | null; // Set after first image processed
+  capturedImageTypes: ('barcode' | 'packaging' | 'nutrition_label')[]; // Types captured so far
+  imageHashes: Array<{
+    hash: string;
+    imageType: 'barcode' | 'packaging' | 'nutrition_label';
+    timestamp: Date;
+  }>;
+  workflowMode: 'guided' | 'progressive'; // Workflow type
+  createdAt: Date;
+  lastUpdatedAt: Date;
+  expiresAt: Date; // TTL index (30 minutes, extended on each update)
+  status: 'active' | 'completed' | 'expired';
+}
+

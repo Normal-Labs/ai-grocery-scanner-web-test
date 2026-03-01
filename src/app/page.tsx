@@ -5,6 +5,9 @@
  * 
  * Main user interface for scanning products using the multi-tier system.
  * Integrates barcode detection with image-based fallback.
+ * Supports both guided Product Hero mode and progressive capture mode.
+ * 
+ * Requirements: 14.1, 14.2, 14.3, 14.4, 14.5
  */
 
 import { useState, useEffect } from 'react';
@@ -12,8 +15,14 @@ import BarcodeScanner from '@/components/BarcodeScanner';
 import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedErrorDisplay';
 import ProgressTracker from '@/components/ProgressTracker';
 import NutritionInsightsDisplay from '@/components/NutritionInsightsDisplay';
+import GuidedCaptureUI from '@/components/GuidedCaptureUI';
+import CompletionPrompt from '@/components/CompletionPrompt';
+import { useProductHero } from '@/contexts/ProductHeroContext';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
+import type { ImageType } from '@/lib/multi-image/DataMerger';
+import { multiImageOrchestrator } from '@/lib/multi-image/MultiImageOrchestrator';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface ProgressStep {
   stage?: string;
@@ -70,6 +79,10 @@ interface DimensionScore {
 }
 
 export default function ScanPage() {
+  // Requirement 14.1: Check Product Hero flag to determine workflow mode
+  const { isProductHero, loading: productHeroLoading } = useProductHero();
+  const { user } = useAuth();
+  
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -85,6 +98,15 @@ export default function ScanPage() {
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [partialResult, setPartialResult] = useState<any>(null);
   const [timeoutWarning, setTimeoutWarning] = useState(false);
+
+  // Guided capture state
+  // Requirement 14.4: Maintain workflow mode throughout Capture_Session
+  const [guidedCaptureStep, setGuidedCaptureStep] = useState<number>(1);
+  const [capturedImageTypes, setCapturedImageTypes] = useState<ImageType[]>([]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  
+  // Requirement 14.1, 14.2, 14.3: Determine workflow mode based on Product Hero flag
+  const workflowMode: 'guided' | 'progressive' = isProductHero ? 'guided' : 'progressive';
 
   // Check for history on client side only
   useEffect(() => {
@@ -285,9 +307,12 @@ export default function ScanPage() {
       // Prepare request body
       const body: any = {
         userId: 'user-' + Date.now(), // In production, use actual user ID
-        sessionId: 'session-' + Date.now(),
+        sessionId: sessionId || 'session-' + Date.now(),
         devUserTier, // Add tier toggle
         streaming: true, // Enable progress streaming
+        // Requirement 14.4: Pass workflowMode to MultiImageOrchestrator
+        // TODO: When MultiImageOrchestrator is integrated via API, pass workflowMode
+        workflowMode, // 'guided' | 'progressive'
       };
 
       if (scanData.barcode) {
@@ -431,6 +456,81 @@ export default function ScanPage() {
     setScanning(false);
   };
 
+  /**
+   * Process image through MultiImageOrchestrator for progressive mode
+   * Requirements 2.1, 2.2, 7.1: Use orchestrator for multi-image workflow
+   */
+  const processImageThroughOrchestrator = async (imageData: string) => {
+    try {
+      console.log('[Scan Page] 🔄 Processing through orchestrator (progressive mode)');
+      
+      // Get userId from auth context
+      const userId = user?.id || 'anonymous-' + Date.now();
+      
+      // Call MultiImageOrchestrator.processImage()
+      const orchestratorResult = await multiImageOrchestrator.processImage(
+        { base64: imageData },
+        userId,
+        workflowMode, // 'progressive'
+        sessionId || undefined
+      );
+      
+      console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
+      
+      // Update session ID if this is the first capture or if session expired
+      if (!sessionId || orchestratorResult.sessionExpired) {
+        setSessionId(orchestratorResult.sessionId);
+      }
+      
+      // Display recovery message if session expired
+      if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
+        console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
+        // You could display this as a toast notification or info banner
+        // For now, we'll just log it - the UI can be enhanced later
+      }
+      
+      // Update captured types for completion prompt
+      setCapturedImageTypes(orchestratorResult.completionStatus.capturedTypes);
+      
+      // Handle ProcessImageResult and update UI accordingly
+      if (orchestratorResult.success) {
+        // Convert Product to ScanResult format for UI compatibility
+        const scanResult: ScanResult = {
+          success: true,
+          product: {
+            id: orchestratorResult.product.id,
+            name: orchestratorResult.product.name,
+            brand: orchestratorResult.product.brand || 'Unknown',
+            barcode: orchestratorResult.product.barcode,
+            size: orchestratorResult.product.size,
+            category: orchestratorResult.product.category || 'Unknown',
+            imageUrl: orchestratorResult.product.image_url,
+          },
+          tier: 4, // Multi-image orchestrator uses tier 4
+          confidenceScore: 0.95,
+          processingTimeMs: 0,
+          cached: false,
+          dimensionStatus: 'skipped',
+          userTier: devUserTier,
+          availableDimensions: [],
+        };
+        
+        setResult(scanResult);
+        
+        // Display CompletionPrompt in progressive mode if not all images captured
+        if (!orchestratorResult.completionStatus.complete) {
+          console.log('[Scan Page] 📋 Showing completion prompt, missing:', 
+            orchestratorResult.completionStatus.missingTypes);
+        } else {
+          console.log('[Scan Page] ✅ All images captured, product complete');
+        }
+      }
+    } catch (err) {
+      console.error('[Scan Page] ❌ Orchestrator processing error:', err);
+      throw err; // Re-throw to be caught by caller
+    }
+  };
+
   const getTierName = (tier: number) => {
     switch (tier) {
       case 1: return 'Direct Barcode';
@@ -532,6 +632,113 @@ export default function ScanPage() {
     setShowScanner(false);
   };
 
+  /**
+   * Handle guided capture image submission
+   * Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true
+   * Requirements 2.1, 2.2: Call MultiImageOrchestrator.processImage()
+   */
+  const handleGuidedImageCapture = async (imageType: ImageType, imageData: string) => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      console.log('[Scan Page] 📸 Guided capture:', { imageType, step: guidedCaptureStep });
+      
+      // Get userId from auth context
+      const userId = user?.id || 'anonymous-' + Date.now();
+      
+      // Call MultiImageOrchestrator.processImage()
+      // Requirements 2.1, 2.2: Pass userId, workflowMode, and sessionId to orchestrator
+      const orchestratorResult = await multiImageOrchestrator.processImage(
+        { base64: imageData },
+        userId,
+        workflowMode, // 'guided'
+        sessionId || undefined
+      );
+      
+      console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
+      
+      // Update session ID if this is the first capture or if session expired
+      if (!sessionId || orchestratorResult.sessionExpired) {
+        setSessionId(orchestratorResult.sessionId);
+      }
+      
+      // Display recovery message if session expired
+      if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
+        console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
+        // You could display this as a toast notification or info banner
+        // For now, we'll just log it - the UI can be enhanced later
+      }
+      
+      // Update captured types
+      setCapturedImageTypes(orchestratorResult.completionStatus.capturedTypes);
+      
+      // Handle ProcessImageResult and update UI accordingly
+      if (orchestratorResult.success) {
+        // Convert Product to ScanResult format for UI compatibility
+        const scanResult: ScanResult = {
+          success: true,
+          product: {
+            id: orchestratorResult.product.id,
+            name: orchestratorResult.product.name,
+            brand: orchestratorResult.product.brand || 'Unknown',
+            barcode: orchestratorResult.product.barcode,
+            size: orchestratorResult.product.size,
+            category: orchestratorResult.product.category || 'Unknown',
+            imageUrl: orchestratorResult.product.image_url,
+          },
+          tier: 4, // Multi-image orchestrator uses tier 4
+          confidenceScore: 0.95,
+          processingTimeMs: 0,
+          cached: false,
+          dimensionStatus: 'skipped',
+          userTier: devUserTier,
+          availableDimensions: [],
+        };
+        
+        setResult(scanResult);
+        
+        // Display next step prompt in guided mode
+        if (orchestratorResult.nextStep) {
+          setGuidedCaptureStep(prev => prev + 1);
+          console.log('[Scan Page] ➡️  Next step:', orchestratorResult.nextStep);
+        } else {
+          // All images captured, show completion
+          console.log('[Scan Page] ✅ All images captured, workflow complete');
+        }
+      }
+    } catch (err) {
+      console.error('[Scan Page] ❌ Guided capture error:', err);
+      setError({
+        message: err instanceof Error ? err.message : 'Failed to process image',
+        timestamp: new Date(),
+        context: {
+          imageType,
+          step: guidedCaptureStep,
+          workflowMode: 'guided',
+        },
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Handle completion prompt capture request
+   * Requirement 14.3: Route to progressive capture UI if isProductHero is false
+   * Requirement 7.1: Display CompletionPrompt in progressive mode
+   */
+  const handleCompletionCaptureRequest = async (imageType: ImageType) => {
+    console.log('[Scan Page] 📸 Completion capture request:', imageType);
+    
+    // Store the requested image type for the next capture
+    // When the scanner completes, we'll process it through the orchestrator
+    setShowScanner(true);
+    
+    // TODO: We could store the requested imageType in state and use it
+    // to validate the captured image matches what was requested
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -571,6 +778,37 @@ export default function ScanPage() {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+        {/* Guided Capture UI - Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true */}
+        {workflowMode === 'guided' && !showHistory && !showScanner && (
+          <div className="space-y-6">
+            {/* Product Hero Mode Header */}
+            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200">
+              <div className="flex items-center gap-3">
+                <div className="text-3xl">🦸</div>
+                <div>
+                  <h2 className="text-lg font-bold text-gray-800">
+                    Product Hero Mode
+                  </h2>
+                  <p className="text-sm text-gray-600">
+                    Guided multi-image capture workflow
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Guided Capture Component */}
+            <GuidedCaptureUI
+              currentStep={guidedCaptureStep}
+              onImageCapture={handleGuidedImageCapture}
+              isProcessing={loading}
+              error={error?.message}
+            />
+          </div>
+        )}
+
+        {/* Progressive Capture UI - Requirement 14.3: Route to progressive capture UI if isProductHero is false */}
+        {workflowMode === 'progressive' && !showHistory && !showScanner && (
+          <>
         {/* Scanner Modal */}
         {showScanner && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
@@ -1020,6 +1258,17 @@ export default function ScanPage() {
             )}
             </>
             )}
+          </div>
+        )}
+
+        {/* Completion Prompt - Show in progressive mode when product has partial data */}
+        {workflowMode === 'progressive' && result && !loading && capturedImageTypes.length > 0 && capturedImageTypes.length < 3 && (
+          <div className="mt-4">
+            <CompletionPrompt
+              capturedTypes={capturedImageTypes}
+              onCaptureRequest={handleCompletionCaptureRequest}
+              isProcessing={loading}
+            />
           </div>
         )}
 
