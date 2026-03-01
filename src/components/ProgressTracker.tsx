@@ -11,7 +11,15 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ProgressStep } from '@/lib/types';
+
+// Flexible progress step interface that supports both scan and research agent progress
+interface ProgressStep {
+  stage?: string;
+  type?: string;
+  message: string;
+  timestamp: number;
+  metadata?: Record<string, any>;
+}
 
 interface ProgressTrackerProps {
   steps: ProgressStep[];
@@ -139,21 +147,24 @@ export default function ProgressTracker({
   error,
   timeoutWarning 
 }: ProgressTrackerProps) {
-  const [showHistory, setShowHistory] = useState(false);
+  const [showHistory, setShowHistory] = useState(true); // Default to expanded
   const [fadeOut, setFadeOut] = useState(false);
 
   // Get current step (last step in array)
   const currentStep = steps[steps.length - 1];
+  
+  // Get step key (either type or stage)
+  const stepKey = currentStep ? (currentStep.stage || currentStep.type) : null;
 
   // Trigger fade out when complete
   useEffect(() => {
-    if (currentStep?.type === 'complete' && !isActive) {
+    if (stepKey === 'complete' && !isActive) {
       const timer = setTimeout(() => {
         setFadeOut(true);
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [currentStep, isActive]);
+  }, [stepKey, isActive]);
 
   // Don't render if no steps and no error
   if (steps.length === 0 && !error) {
@@ -165,7 +176,7 @@ export default function ProgressTracker({
     return null;
   }
 
-  const stepInfo = currentStep ? STEP_INFO[currentStep.type] : null;
+  const stepInfo = stepKey ? STEP_INFO[stepKey] : null;
 
   return (
     <div
@@ -222,19 +233,21 @@ export default function ProgressTracker({
             </span>
             <div className="flex-1">
               <p className="font-medium text-indigo-700">Product Identified</p>
-              {partialResult.productName && (
+              {(partialResult.product?.name || partialResult.productName) && (
                 <p className="text-sm text-indigo-600 mt-1 font-semibold">
-                  {partialResult.productName}
+                  {partialResult.product?.name || partialResult.productName}
                 </p>
               )}
-              {partialResult.brand && (
+              {(partialResult.product?.brand || partialResult.brand) && (
                 <p className="text-xs text-indigo-500 mt-1">
-                  Brand: {partialResult.brand}
+                  Brand: {partialResult.product?.brand || partialResult.brand}
                 </p>
               )}
-              <p className="text-xs text-indigo-500 mt-2">
-                Analyzing dimensions...
-              </p>
+              {partialResult.dimensionStatus === 'processing' && (
+                <p className="text-xs text-indigo-500 mt-2">
+                  Analyzing dimensions...
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -251,7 +264,7 @@ export default function ProgressTracker({
                   isActive ? 'animate-pulse' : ''
                 }`}
                 role="img"
-                aria-label={currentStep.type}
+                aria-label={stepKey || 'progress'}
               >
                 {stepInfo.icon}
               </span>
@@ -268,7 +281,7 @@ export default function ProgressTracker({
             </div>
 
             {/* Loading Spinner */}
-            {isActive && currentStep.type !== 'complete' && (
+            {isActive && stepKey !== 'complete' && (
               <div className="flex-shrink-0">
                 <div className="animate-spin h-5 w-5 border-2 border-blue-600 border-t-transparent rounded-full" />
               </div>
@@ -295,14 +308,15 @@ export default function ProgressTracker({
           {showHistory && (
             <div className="px-4 pb-4 space-y-2 max-h-48 overflow-y-auto">
               {steps.slice(0, -1).map((step, index) => {
-                const info = STEP_INFO[step.type];
+                const key = step.stage || step.type || 'progress';
+                const info = STEP_INFO[key];
                 return (
                   <div
                     key={`${step.timestamp}-${index}`}
                     className="flex items-start gap-2 text-sm py-2 border-l-2 border-gray-200 pl-3"
                   >
-                    <span className="text-base flex-shrink-0" role="img" aria-label={step.type}>
-                      {info.icon}
+                    <span className="text-base flex-shrink-0" role="img" aria-label={key}>
+                      {info?.icon || '📍'}
                     </span>
                     <div className="flex-1 min-w-0">
                       <p className="text-gray-700">{step.message}</p>

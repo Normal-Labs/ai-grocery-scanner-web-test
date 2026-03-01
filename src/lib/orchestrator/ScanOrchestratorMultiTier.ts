@@ -108,17 +108,15 @@ export class ScanOrchestratorMultiTier {
             1.0
           );
           
-          // Emit final result
-          const result = {
+          // Return result (IntegrationLayer will emit final result after dimension analysis)
+          const result: ScanResponse = {
             success: true,
             product: tier1Result.product,
-            tier: 1,
+            tier: 1 as Tier,
             confidenceScore: 1.0, // Requirement 13.2: Tier 1 = 1.0 confidence
             processingTimeMs,
             cached: tier1Result.cached,
           };
-          
-          progressEmitter?.emitFinalResult(result);
           
           return result;
         } else {
@@ -176,17 +174,15 @@ export class ScanOrchestratorMultiTier {
             ? 'Low confidence match. Please verify the product details.'
             : undefined;
           
-          const result = {
+          const result: ScanResponse = {
             success: true,
             product: tier2Result.product,
-            tier: 2,
+            tier: 2 as Tier,
             confidenceScore: tier2Result.confidence,
             processingTimeMs,
             cached: false,
             warning,
           };
-          
-          progressEmitter?.emitFinalResult(result);
           
           return result;
         }
@@ -268,17 +264,15 @@ export class ScanOrchestratorMultiTier {
             ? 'Product identified via barcode discovery. Please verify the details.'
             : undefined;
           
-          const result = {
+          const result: ScanResponse = {
             success: true,
             product: tier3Result.product,
-            tier: 3,
+            tier: 3 as Tier,
             confidenceScore: tier3Result.confidence,
             processingTimeMs,
             cached: false,
             warning,
           };
-          
-          progressEmitter?.emitFinalResult(result);
           
           return result;
         } else {
@@ -345,17 +339,15 @@ export class ScanOrchestratorMultiTier {
             ? 'AI-based identification. Please verify the product details.'
             : undefined;
           
-          const result = {
+          const result: ScanResponse = {
             success: true,
             product: tier4Result.product,
-            tier: 4,
+            tier: 4 as Tier,
             confidenceScore: tier4Result.confidence,
             processingTimeMs,
             cached: false,
             warning,
           };
-          
-          progressEmitter?.emitFinalResult(result);
           
           return result;
         } else {

@@ -15,9 +15,11 @@ import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
 
 interface ProgressStep {
-  type: string;
+  stage?: string;
+  type?: string;
   message: string;
   timestamp: number;
+  metadata?: Record<string, any>;
 }
 
 interface ScanResult {
@@ -80,6 +82,7 @@ export default function ScanPage() {
   // Progress tracking state
   const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
   const [partialResult, setPartialResult] = useState<any>(null);
+  const [timeoutWarning, setTimeoutWarning] = useState(false);
 
   // Check for history on client side only
   useEffect(() => {
@@ -101,6 +104,14 @@ export default function ScanPage() {
     setResult(null);
     setProgressSteps([]); // Reset progress
     setPartialResult(null); // Reset partial result
+    setTimeoutWarning(false); // Reset timeout warning
+    
+    // Set timeout warning after 30 seconds
+    const timeoutId = setTimeout(() => {
+      if (loading) {
+        setTimeoutWarning(true);
+      }
+    }, 30000);
 
     try {
       console.log('[Scan Page] 📤 Sending scan request:', {
@@ -241,6 +252,7 @@ export default function ScanPage() {
     } finally {
       setLoading(false);
       setScanning(false);
+      clearTimeout(timeoutId); // Clear timeout on completion or error
     }
   };
 
@@ -583,6 +595,7 @@ export default function ScanPage() {
                 isActive={loading}
                 partialResult={partialResult}
                 error={error?.message || null}
+                timeoutWarning={timeoutWarning}
               />
             )}
             

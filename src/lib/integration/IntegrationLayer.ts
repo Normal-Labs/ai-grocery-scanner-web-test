@@ -55,6 +55,7 @@ export class IntegrationLayer {
 
     // Step 1: Product identification using existing multi-tier orchestrator
     // Requirement 1.2: Pass barcode/image unchanged
+    // NOTE: Do NOT emit final result in orchestrator - we need to keep session alive for dimension analysis
     const identificationResult = await this.multiTierOrchestrator.scan({
       barcode: request.barcode,
       image: request.image,
@@ -65,6 +66,14 @@ export class IntegrationLayer {
 
     // If identification failed, return early
     if (!identificationResult.success || !identificationResult.product) {
+      // Emit final result for failed identification
+      progressEmitter?.emitFinalResult({
+        ...identificationResult,
+        dimensionStatus: 'skipped' as DimensionStatus,
+        userTier: await this.getUserTier(request.userId),
+        availableDimensions: [],
+      });
+      
       return {
         ...identificationResult,
         dimensionStatus: 'skipped' as DimensionStatus,
@@ -76,19 +85,44 @@ export class IntegrationLayer {
     // Step 2: Determine user tier (Requirement 5.3)
     const userTier = await this.getUserTier(request.userId);
 
-    // Step 3: Skip dimension analysis if requested (Requirement 8.3)
+    // Step 3: Emit partial result with product info (Requirement 3.1, 11.1)
+    // This allows frontend to display product immediately while dimension analysis continues
+    console.log('[Integration Layer] 📤 Emitting partial result with product info');
+    progressEmitter?.emitPartialResult({
+      success: true,
+      product: identificationResult.product,
+      tier: identificationResult.tier,
+      confidenceScore: identificationResult.confidenceScore,
+      processingTimeMs: identificationResult.processingTimeMs,
+      cached: identificationResult.cached,
+      warning: identificationResult.warning,
+      dimensionStatus: 'processing' as DimensionStatus,
+      userTier,
+      availableDimensions: this.getAvailableDimensions(userTier),
+    });
+
+    // Step 4: Skip dimension analysis if requested (Requirement 8.3)
     if (skipDimensionAnalysis) {
-      return {
+      const finalResult = {
         ...identificationResult,
         dimensionStatus: 'skipped' as DimensionStatus,
         userTier,
         availableDimensions: this.getAvailableDimensions(userTier),
       };
+      progressEmitter?.emitFinalResult(finalResult);
+      return finalResult;
     }
 
-    // Step 4: Dimension analysis (Requirements 1.4, 1.5)
-    // Note: In production, this could be done asynchronously for progressive updates
+    // Step 5: Dimension analysis (Requirements 1.4, 1.5)
+    // Emit progress events for each dimension being analyzed
     try {
+      // Emit dimension analysis start
+      progressEmitter?.emit(
+        'dimension_analysis_start',
+        'Starting dimension analysis',
+        { userTier, availableDimensions: this.getAvailableDimensions(userTier) }
+      );
+      
       const dimensionResult = await this.dimensionAnalyzer.analyze({
         productId: identificationResult.product.id,
         productData: identificationResult.product,
@@ -111,7 +145,7 @@ export class IntegrationLayer {
           apiCost: 0,
         });
 
-        return {
+        const failedResult = {
           ...identificationResult,
           dimensionStatus: 'failed' as DimensionStatus,
           userTier,
@@ -125,6 +159,11 @@ export class IntegrationLayer {
               }
             : undefined,
         };
+        
+        // Emit final result even on dimension analysis failure
+        progressEmitter?.emitFinalResult(failedResult);
+        
+        return failedResult;
       }
 
       // Apply tier-based filtering (Requirements 5.1, 5.2, 5.4)
@@ -156,7 +195,7 @@ export class IntegrationLayer {
         dimensionsViewed: this.getAvailableDimensions(userTier),
       });
 
-      return {
+      const finalResult = {
         ...identificationResult,
         dimensionAnalysis: filteredAnalysis,
         dimensionStatus: 'completed' as DimensionStatus,
@@ -168,6 +207,12 @@ export class IntegrationLayer {
             ? 'Upgrade to Premium to see all 5 dimensions'
             : undefined,
       };
+      
+      // Emit final result with complete dimension analysis (Requirement 3.2)
+      console.log('[Integration Layer] ✅ Emitting final result with dimension analysis');
+      progressEmitter?.emitFinalResult(finalResult);
+      
+      return finalResult;
     } catch (error) {
       // Graceful degradation: return product info even if dimension analysis fails
       // Requirement 11.1, 11.7
@@ -185,7 +230,7 @@ export class IntegrationLayer {
         apiCost: 0,
       });
 
-      return {
+      const exceptionResult = {
         ...identificationResult,
         dimensionStatus: 'failed' as DimensionStatus,
         userTier,
@@ -197,6 +242,11 @@ export class IntegrationLayer {
           retryable: true,
         },
       };
+      
+      // Emit final result even on exception
+      progressEmitter?.emitFinalResult(exceptionResult);
+      
+      return exceptionResult;
     }
   }
 

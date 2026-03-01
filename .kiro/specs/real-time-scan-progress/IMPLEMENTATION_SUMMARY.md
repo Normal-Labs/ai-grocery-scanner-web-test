@@ -16,17 +16,21 @@ This document summarizes what was actually implemented for the real-time scan pr
 - ✅ **Polling Fallback** - Polling endpoint created at `/api/scan/progress`
 - ✅ **Enhanced ProgressTracker** - Extended with scan stages, partial results, timeout warnings, retry button
 - ✅ **Main Page Integration** - Progress tracker integrated into `src/app/page.tsx` (main route `/`)
+- ✅ **Step History** - Collapsible step history (defaults to expanded)
 
-### Phase 3: Orchestrator Integration ✅
+### Phase 3: Progressive Delivery & Orchestrator Integration ✅
 - ✅ **ScanOrchestrator** - Enhanced with progress emission for cache/database/AI stages
 - ✅ **ScanOrchestratorMultiTier** - Enhanced with tier-specific progress events (Tier 1-4)
-- ✅ **IntegrationLayer** - Updated to pass progressEmitter through the chain
+- ✅ **IntegrationLayer** - Implements progressive result delivery with partial and final result emission
 - ✅ **Tier Transitions** - Events emitted when fallback occurs between tiers
+- ✅ **Partial Result Emission** - Product info emitted immediately after identification
+- ✅ **Dimension Analysis Progress** - Session stays alive during dimension analysis
+- ✅ **Final Result Emission** - Only emitted after dimension analysis completes
 
 ### Phase 4 & 5: Partial Implementation ⚠️
-- ✅ **Error Handling** - Basic error emission and display
+- ✅ **Error Handling** - Comprehensive error emission and display
 - ✅ **Connection Error Handling** - Backend continues processing on disconnect
-- ⚠️ **Timeout Warnings** - UI component ready but not fully wired
+- ✅ **Timeout Warnings** - 30-second timeout warning implemented
 - ⚠️ **Logging** - Basic console logging, but not comprehensive metrics
 - ⚠️ **Performance Optimization** - Not explicitly tested
 - ⚠️ **Property-Based Tests** - Not implemented (all optional tasks)
@@ -46,19 +50,48 @@ This document summarizes what was actually implemented for the real-time scan pr
 - Simpler to integrate streaming into existing code
 - The hook is available for future use in other components
 
-### 3. Progress State Management
+### 3. Progressive Result Delivery Architecture
+**Decision**: IntegrationLayer controls all final result emission, not the orchestrator.
+
+**Rationale**:
+- Prevents "Session not found" errors
+- Keeps session alive during dimension analysis
+- Allows partial results to be emitted after product identification
+- Ensures final result includes complete dimension analysis
+
+**Implementation Flow**:
+1. Orchestrator identifies product → returns result (no emission)
+2. IntegrationLayer emits partial result with product info
+3. Dimension analysis runs (session stays alive)
+4. IntegrationLayer emits final result with dimensions
+
+### 4. Progress State Management
 **Decision**: Added `progressSteps` and `partialResult` state to the main page component.
 
 **Implementation**:
 ```typescript
 const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
 const [partialResult, setPartialResult] = useState<any>(null);
+const [timeoutWarning, setTimeoutWarning] = useState(false);
 ```
 
-### 4. Unique Keys for Progress Steps
+### 5. Unique Keys for Progress Steps
 **Decision**: Use `${step.timestamp}-${index}` as React keys instead of just `timestamp`.
 
 **Rationale**: Multiple events can occur at the same timestamp, causing duplicate key warnings.
+
+### 6. Flexible ProgressStep Interface
+**Decision**: ProgressTracker uses a flexible local interface supporting both `stage` and `type` fields.
+
+**Rationale**: 
+- Scan progress uses `stage` field
+- Research agent uses `type` field
+- Single component handles both use cases
+
+### 7. Stream Controller State Checking
+**Decision**: Check `controller.desiredSize !== null` before closing stream.
+
+**Rationale**: Prevents "Controller is already closed" errors during cleanup.
 
 ## Progress Events Emitted
 
@@ -68,6 +101,9 @@ const [partialResult, setPartialResult] = useState<any>(null);
 3. **Tier 3** (if Tier 2 fails): "Discovering product via API"
 4. **Tier 4** (if all else fails): "Analyzing image with AI"
 5. **Tier Transitions**: "Trying alternative approach" (when fallback occurs)
+6. **Partial Result**: Product info displayed immediately after identification
+7. **Dimension Analysis**: "Starting dimension analysis" (if applicable)
+8. **Final Result**: Complete results with dimension analysis
 
 ### Standard Scan Flow (ScanOrchestrator)
 1. "Checking for barcode"
@@ -82,15 +118,19 @@ const [partialResult, setPartialResult] = useState<any>(null);
 - No visibility into backend processing
 - All results returned at once
 - No indication of which tier was being attempted
+- Dimension analysis happened after session closed (causing errors)
 
 ### After
 - Real-time progress updates showing current stage
 - Visual feedback with animated icons
-- Step history (collapsible)
+- Step history (expanded by default, collapsible)
 - Tier-specific messages
 - Smooth transitions between stages
+- **Partial results**: Product info shown immediately
+- **Progressive delivery**: Dimension analysis shown separately
 - Error messages with retry option
-- Support for partial results (infrastructure ready)
+- 30-second timeout warning
+- Session stays alive until all analysis completes
 
 ## Files Modified
 
@@ -101,22 +141,45 @@ const [partialResult, setPartialResult] = useState<any>(null);
 - `src/app/api/scan-multi-tier/route.ts` (streaming support)
 - `src/app/api/scan/progress/route.ts` (new - polling endpoint)
 - `src/lib/orchestrator/ScanOrchestrator.ts` (progress emission)
-- `src/lib/orchestrator/ScanOrchestratorMultiTier.ts` (progress emission)
-- `src/lib/integration/IntegrationLayer.ts` (progressEmitter parameter)
+- `src/lib/orchestrator/ScanOrchestratorMultiTier.ts` (progress emission, removed premature final results)
+- `src/lib/integration/IntegrationLayer.ts` (progressive delivery, partial/final result emission)
 
 ### Frontend
 - `src/hooks/useScanWithProgress.ts` (new)
-- `src/components/ProgressTracker.tsx` (enhanced)
-- `src/app/page.tsx` (streaming integration)
+- `src/components/ProgressTracker.tsx` (enhanced with partial results, flexible interface)
+- `src/app/page.tsx` (streaming integration, partial result handling)
+
+## Critical Bug Fixes
+
+### 1. Session Cleanup Race Condition ✅
+**Problem**: Dimension analysis was happening after session cleanup, causing "Session not found" errors.
+
+**Solution**: 
+- Orchestrator no longer emits final results
+- IntegrationLayer controls all emission
+- Session stays alive until dimension analysis completes
+
+### 2. Duplicate React Keys ✅
+**Problem**: Multiple events at same timestamp caused duplicate key warnings.
+
+**Solution**: Use `${step.timestamp}-${index}` as keys.
+
+### 3. Stream Controller Already Closed ✅
+**Problem**: Attempting to close already-closed stream controllers.
+
+**Solution**: Check `controller.desiredSize !== null` before closing.
+
+### 4. TypeScript Type Compatibility ✅
+**Problem**: Multiple ProgressStep interfaces with incompatible types.
+
+**Solution**: ProgressTracker uses flexible local interface supporting both `stage` and `type`.
 
 ## Known Limitations
 
-1. **Dimension Analysis Progress**: Not yet implemented - would show progress for each dimension being analyzed
-2. **Progressive Result Delivery**: Infrastructure is ready but not fully utilized (partial results not yet emitted for product identification)
-3. **Timeout Warnings**: Component supports it but 30-second timeout not implemented
-4. **Comprehensive Logging**: Basic logging exists but not the full metrics system
-5. **Property-Based Tests**: None implemented (all were optional)
-6. **Performance Benchmarks**: Not conducted
+1. **Comprehensive Logging**: Basic logging exists but not the full metrics system
+2. **Property-Based Tests**: None implemented (all were optional)
+3. **Performance Benchmarks**: Not conducted
+4. **Dimension-Specific Progress**: Could add individual progress events for each dimension
 
 ## Testing Status
 
@@ -124,7 +187,10 @@ const [partialResult, setPartialResult] = useState<any>(null);
 - Multi-tier scans working with progress display
 - Tier 1, 2, and 4 confirmed working by user
 - Progress tracker displays correctly
-- No duplicate key errors after fix
+- No duplicate key errors
+- Partial results display correctly
+- Dimension analysis completes successfully
+- Session stays alive throughout entire process
 
 ### Automated Testing ❌
 - No unit tests written
@@ -133,15 +199,21 @@ const [partialResult, setPartialResult] = useState<any>(null);
 
 ## Next Steps (If Needed)
 
-1. **Dimension Analysis Progress**: Add progress events for each dimension being analyzed
-2. **Progressive Delivery**: Emit partial results when product is identified before dimensions
-3. **Timeout Implementation**: Add 30-second timeout warning
-4. **Comprehensive Logging**: Implement full metrics and monitoring
-5. **Testing**: Add unit and integration tests
-6. **Performance**: Benchmark and optimize if needed
+1. **Dimension-Specific Progress**: Add individual progress events for each dimension (health, processing, allergens, etc.)
+2. **Comprehensive Logging**: Implement full metrics and monitoring system
+3. **Testing**: Add unit and integration tests
+4. **Performance**: Benchmark and optimize if needed
+5. **Property-Based Tests**: Implement the 27 correctness properties defined in design
 
 ## Conclusion
 
-The core real-time progress feature is **fully functional** and provides significant UX improvements. Users can now see exactly what's happening during scans instead of just a loading spinner. The implementation focused on the most impactful features first, with optional enhancements (tests, advanced logging, etc.) deferred.
+The real-time progress feature is **fully functional** and provides significant UX improvements. Users can now see exactly what's happening during scans with progressive result delivery:
+
+1. **Product identification** shown immediately
+2. **Dimension analysis** runs in background
+3. **Complete results** displayed when ready
+
+The critical "Session not found" bug has been fixed by implementing proper progressive delivery architecture where IntegrationLayer controls all result emission.
 
 **Status**: ✅ MVP Complete and Working
+**Latest Update**: Progressive delivery implemented, step history defaults to expanded
