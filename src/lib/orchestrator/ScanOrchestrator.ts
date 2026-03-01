@@ -23,6 +23,8 @@ import type {
 import type { Coordinates } from '../supabase/types';
 import type { CachedInsight } from '../mongodb/types';
 import type { AnalysisResult } from '@/lib/types';
+import type { IProgressEmitter } from '../progress/ProgressEmitter';
+import { ScanStage, STAGE_MESSAGES } from '../progress/ProgressEmitter';
 
 /**
  * ScanOrchestrator class
@@ -67,6 +69,7 @@ export class ScanOrchestrator {
    * - 10.4, 10.5: Error handling and retry logic
    * 
    * @param request - Scan request with barcode, image, user, location, tier
+   * @param progressEmitter - Optional progress emitter for real-time updates
    * @returns Promise resolving to scan result with analysis and metadata
    * 
    * @example
@@ -90,8 +93,14 @@ export class ScanOrchestrator {
    * console.log('Product:', result.product.name);
    * ```
    */
-  async processScan(request: ScanRequest): Promise<ScanResult> {
+  async processScan(request: ScanRequest, progressEmitter?: IProgressEmitter): Promise<ScanResult> {
     const startTime = Date.now();
+    
+    // Emit initial progress event
+    progressEmitter?.emit(
+      ScanStage.BARCODE_CHECK,
+      STAGE_MESSAGES[ScanStage.BARCODE_CHECK]
+    );
     
     console.log('[ScanOrchestrator] Processing scan:', {
       barcode: request.barcode || 'none',
@@ -105,6 +114,13 @@ export class ScanOrchestrator {
     try {
       // Step 1: Check MongoDB cache for existing insight
       // Requirement 5.1: Query MongoDB AI_Cache for existing insights
+      
+      // Emit cache check progress
+      progressEmitter?.emit(
+        ScanStage.CACHE_CHECK,
+        STAGE_MESSAGES[ScanStage.CACHE_CHECK]
+      );
+      
       let cachedInsight: CachedInsight | null = null;
       let imageHash: string | undefined;
       
@@ -167,8 +183,14 @@ export class ScanOrchestrator {
         });
         console.log('📊 [DATA SOURCE] MongoDB Cache - Instant retrieval');
         
+        // Emit database check progress
+        progressEmitter?.emit(
+          ScanStage.DATABASE_CHECK,
+          STAGE_MESSAGES[ScanStage.DATABASE_CHECK]
+        );
+        
         // Requirement 5.2, 5.3: Handle cache hit
-        result = await this.handleCacheHit(request.barcode, imageHash, cachedInsight, request);
+        result = await this.handleCacheHit(request.barcode, imageHash, cachedInsight, request, progressEmitter);
       } else {
         console.log('[ScanOrchestrator] Cache miss:', {
           barcode: request.barcode || 'none',
@@ -176,8 +198,14 @@ export class ScanOrchestrator {
         });
         console.log('🤖 [DATA SOURCE] Fresh AI Analysis - Calling Gemini 2.0 Flash');
         
+        // Emit AI research progress
+        progressEmitter?.emit(
+          ScanStage.AI_RESEARCH,
+          STAGE_MESSAGES[ScanStage.AI_RESEARCH]
+        );
+        
         // Requirement 5.4, 5.5, 5.6: Handle cache miss
-        result = await this.handleCacheMiss(request, imageHash);
+        result = await this.handleCacheMiss(request, imageHash, progressEmitter);
       }
 
       // Step 3: Process location if provided
@@ -211,6 +239,9 @@ export class ScanOrchestrator {
         timestamp: new Date().toISOString(),
       });
       
+      // Emit final result
+      progressEmitter?.emitFinalResult(result);
+      
       // Summary log showing complete data flow
       console.log('═══════════════════════════════════════════════════');
       console.log('📋 SCAN SUMMARY');
@@ -240,6 +271,11 @@ export class ScanOrchestrator {
         stack: error instanceof Error ? error.stack : undefined,
         timestamp: new Date().toISOString(),
       });
+
+      // Emit error event
+      if (error instanceof Error) {
+        progressEmitter?.emitError(error);
+      }
 
       // Re-throw OrchestratorError as-is, wrap other errors
       if (this.isOrchestratorError(error)) {
@@ -277,13 +313,15 @@ export class ScanOrchestrator {
    * @param imageHash - Image hash (optional)
    * @param cachedInsight - Cached insight from MongoDB
    * @param request - Original scan request
+   * @param progressEmitter - Optional progress emitter
    * @returns Promise resolving to scan result with cached data
    */
   private async handleCacheHit(
     barcode: string | undefined,
     imageHash: string | undefined,
     cachedInsight: CachedInsight,
-    request: ScanRequest
+    request: ScanRequest,
+    progressEmitter?: IProgressEmitter
   ): Promise<ScanResult> {
     console.log('[ScanOrchestrator] Handling cache hit:', {
       barcode: barcode || 'none',
@@ -442,9 +480,10 @@ export class ScanOrchestrator {
    * 
    * @param request - Original scan request
    * @param imageHash - Hash of the image for caching
+   * @param progressEmitter - Optional progress emitter
    * @returns Promise resolving to scan result with new analysis
    */
-  private async handleCacheMiss(request: ScanRequest, imageHash?: string): Promise<ScanResult> {
+  private async handleCacheMiss(request: ScanRequest, imageHash?: string, progressEmitter?: IProgressEmitter): Promise<ScanResult> {
     console.log('[ScanOrchestrator] Handling cache miss:', {
       barcode: request.barcode || 'none',
       tier: request.tier,

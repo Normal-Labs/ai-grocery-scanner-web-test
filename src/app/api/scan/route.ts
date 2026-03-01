@@ -16,6 +16,8 @@ import { scanOrchestrator } from '@/lib/orchestrator/ScanOrchestrator';
 import { isScanRequest, isOrchestratorError } from '@/lib/orchestrator/types';
 import type { ScanRequest, ScanResult, OrchestratorError } from '@/lib/orchestrator/types';
 import type { TierType, InsightCategory } from '@/lib/types';
+import { progressManager } from '@/lib/progress/ProgressManager';
+import { ProgressEmitter } from '@/lib/progress/ProgressEmitter';
 
 /**
  * Base64 image data validation regex
@@ -191,6 +193,9 @@ export async function POST(request: NextRequest) {
     // Step 3: Parse and validate request body
     const body = await request.json();
 
+    // Check if client supports streaming
+    const streaming = body.streaming === true;
+
     // Validate barcode (optional)
     if (body.barcode) {
       if (typeof body.barcode !== 'string') {
@@ -329,31 +334,72 @@ export async function POST(request: NextRequest) {
       hasLocation: !!location,
       tier,
       dimension: dimension || 'all',
+      streaming,
     });
 
     // Step 5: Process scan using orchestrator
     // Requirements 5.1-5.6: Cache-first scan flow
-    const result = await scanOrchestrator.processScan(scanRequest);
-
-    const duration = Date.now() - startTime;
     
-    console.log('[Scan API] Scan completed successfully:', {
-      timestamp: new Date().toISOString(),
-      barcode: scanRequest.barcode || 'none',
-      userId,
-      fromCache: result.fromCache,
-      hasStore: !!result.storeId,
-      duration,
+    // If streaming is not requested, use traditional response
+    if (!streaming) {
+      const result = await scanOrchestrator.processScan(scanRequest);
+
+      const duration = Date.now() - startTime;
+      
+      console.log('[Scan API] Scan completed successfully:', {
+        timestamp: new Date().toISOString(),
+        barcode: scanRequest.barcode || 'none',
+        userId,
+        fromCache: result.fromCache,
+        hasStore: !!result.storeId,
+        duration,
+      });
+
+      // Step 6: Return successful response
+      return NextResponse.json(
+        {
+          success: true,
+          data: result,
+        } as ScanResponse,
+        { status: 200 }
+      );
+    }
+
+    // Streaming response using SSE
+    const sessionId = progressManager.createSession(userId);
+    const progressEmitter = new ProgressEmitter(sessionId, progressManager);
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Set controller for the session
+          progressManager.setController(sessionId, controller);
+
+          // Process scan with progress emission
+          await scanOrchestrator.processScan(scanRequest, progressEmitter);
+
+        } catch (error) {
+          console.error('[Scan API] Error during streaming scan:', error);
+          progressEmitter.emitError(error as Error);
+        } finally {
+          // Cleanup will be handled by ProgressManager after delay
+          controller.close();
+        }
+      },
+      cancel() {
+        // Client disconnected
+        console.log(`[Scan API] Client disconnected from session: ${sessionId}`);
+        progressManager.handleConnectionError(sessionId, new Error('Client disconnected'));
+      }
     });
 
-    // Step 6: Return successful response
-    return NextResponse.json(
-      {
-        success: true,
-        data: result,
-      } as ScanResponse,
-      { status: 200 }
-    );
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
 
   } catch (error) {
     const duration = Date.now() - startTime;
