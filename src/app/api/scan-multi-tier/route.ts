@@ -15,6 +15,8 @@ import { IntegrationLayer } from '@/lib/integration/IntegrationLayer';
 import { dimensionAnalyzer } from '@/lib/analyzer/DimensionAnalyzer';
 import { hashImage } from '@/lib/imageHash';
 import { ScanRequest, ImageData } from '@/lib/types/multi-tier';
+import { progressManager } from '@/lib/progress/ProgressManager';
+import { ProgressEmitter } from '@/lib/progress/ProgressEmitter';
 
 /**
  * POST /api/scan-multi-tier
@@ -68,6 +70,7 @@ export async function POST(request: NextRequest) {
       skipDimensionAnalysis = false,  // Requirement 8.3
       pollToken,                       // Requirement 8.5
       devUserTier,                     // Development: Override user tier
+      streaming = false,               // Enable progress streaming
     } = body;
 
     // Validate required fields
@@ -164,11 +167,13 @@ export async function POST(request: NextRequest) {
     const orchestrator = createScanOrchestrator();
     const integrationLayer = new IntegrationLayer(orchestrator, dimensionAnalyzer);
     
-    // Process scan with dimension analysis
-    // Requirement 8.2: Return both product identification and dimension analysis
-    const result = await integrationLayer.processScan(scanRequest, skipDimensionAnalysis);
+    // If streaming is not requested, use traditional response
+    if (!streaming) {
+      // Process scan with dimension analysis
+      // Requirement 8.2: Return both product identification and dimension analysis
+      const result = await integrationLayer.processScan(scanRequest, skipDimensionAnalysis);
 
-    const totalTime = Date.now() - startTime;
+      const totalTime = Date.now() - startTime;
 
     // Requirement 6.7: Update scan log with dimension analysis fields
     if (result.success && result.product) {
@@ -248,8 +253,52 @@ export async function POST(request: NextRequest) {
     console.log('═══════════════════════════════════════════════════');
 
     // Return response (Requirement 8.7: Maintain backward compatibility)
-    return NextResponse.json(result, {
-      status: result.success ? 200 : 500,
+      return NextResponse.json(result, {
+        status: result.success ? 200 : 500,
+      });
+    }
+
+    // Streaming response using SSE
+    const progressSessionId = progressManager.createSession(userId);
+    const progressEmitter = new ProgressEmitter(progressSessionId, progressManager);
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          // Set controller for the session
+          progressManager.setController(progressSessionId, controller);
+
+          // Process scan with progress emission
+          const result = await integrationLayer.processScan(
+            scanRequest, 
+            skipDimensionAnalysis, 
+            progressEmitter
+          );
+
+          // Emit final result
+          progressEmitter.emitFinalResult(result);
+
+        } catch (error) {
+          console.error('[Scan API Multi-Tier] Error during streaming scan:', error);
+          progressEmitter.emitError(error as Error);
+        } finally {
+          // Cleanup will be handled by ProgressManager after delay
+          controller.close();
+        }
+      },
+      cancel() {
+        // Client disconnected
+        console.log(`[Scan API Multi-Tier] Client disconnected from session: ${progressSessionId}`);
+        progressManager.handleConnectionError(progressSessionId, new Error('Client disconnected'));
+      }
+    });
+
+    return new Response(stream, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
   } catch (error) {
     const totalTime = Date.now() - startTime;

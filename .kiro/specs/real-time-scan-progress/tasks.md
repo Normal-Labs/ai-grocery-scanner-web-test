@@ -174,8 +174,8 @@ This implementation plan follows a 5-phase approach to build a real-time progres
     - Test backward compatibility (no emitter)
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.8_
 
-- [ ] 10. Enhance ScanOrchestratorMultiTier with progress events
-  - [ ] 10.1 Add progress emission to ScanOrchestratorMultiTier
+- [x] 10. Enhance ScanOrchestratorMultiTier with progress events
+  - [x] 10.1 Add progress emission to ScanOrchestratorMultiTier
     - Update `src/lib/orchestrators/ScanOrchestratorMultiTier.ts`
     - Add optional progressEmitter parameter to scan method
     - Emit tier-specific events (tier1, tier2, tier3, tier4)
@@ -395,7 +395,7 @@ This implementation plan follows a 5-phase approach to build a real-time progres
     - _Requirements: 7.1, 7.2, 7.5_
 
 - [ ] 18. Final integration and polish
-  - [ ] 18.1 Update scan components to use new hook
+  - [x] 18.1 Update scan components to use new hook
     - Update existing scan UI components
     - Replace useScan with useScanWithProgress where appropriate
     - Ensure smooth user experience

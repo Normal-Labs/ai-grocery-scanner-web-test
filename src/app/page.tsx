@@ -10,8 +10,15 @@
 import { useState, useEffect } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedErrorDisplay';
+import ProgressTracker from '@/components/ProgressTracker';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
+
+interface ProgressStep {
+  type: string;
+  message: string;
+  timestamp: number;
+}
 
 interface ScanResult {
   success: boolean;
@@ -69,6 +76,10 @@ export default function ScanPage() {
   const [history, setHistory] = useState<SavedScan[]>([]);
   const [showScanner, setShowScanner] = useState(false);
   const [hasHistoryItems, setHasHistoryItems] = useState(false);
+  
+  // Progress tracking state
+  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
+  const [partialResult, setPartialResult] = useState<any>(null);
 
   // Check for history on client side only
   useEffect(() => {
@@ -88,6 +99,8 @@ export default function ScanPage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setProgressSteps([]); // Reset progress
+    setPartialResult(null); // Reset partial result
 
     try {
       console.log('[Scan Page] 📤 Sending scan request:', {
@@ -100,6 +113,7 @@ export default function ScanPage() {
         userId: 'user-' + Date.now(), // In production, use actual user ID
         sessionId: 'session-' + Date.now(),
         devUserTier, // Add tier toggle
+        streaming: true, // Enable progress streaming
       };
 
       if (scanData.barcode) {
@@ -111,7 +125,7 @@ export default function ScanPage() {
         body.imageMimeType = scanData.imageMimeType || 'image/jpeg';
       }
 
-      // Call multi-tier scan API
+      // Call multi-tier scan API with streaming
       const response = await fetch('/api/scan-multi-tier', {
         method: 'POST',
         headers: {
@@ -120,48 +134,96 @@ export default function ScanPage() {
         body: JSON.stringify(body),
       });
 
-      const data = await response.json();
-      console.log('[Scan Page] 📥 Scan result:', data);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || 'Scan failed');
+      }
 
-      setResult(data);
+      if (!response.body) {
+        throw new Error('No response body');
+      }
 
-      if (!data.success) {
-        setError({
-          message: data.error?.message || 'Scan failed',
-          code: data.error?.code,
-          timestamp: new Date(),
-          context: {
-            barcode: scanData.barcode,
-            tier: devUserTier,
-            responseStatus: response.status,
-          },
-        });
-      } else if (data.success && data.product) {
-        // Save successful scan to history
-        try {
-          // Convert scan result to AnalysisResult format for storage
-          const analysisResult = {
-            products: [{
-              productName: data.product.name,
-              brand: data.product.brand,
-              category: data.product.category,
-              barcode: data.product.barcode,
-              size: data.product.size,
-              confidence: data.confidenceScore,
-              dimensions: data.dimensionAnalysis?.dimensions || {},
-            }],
-            metadata: {
-              tier: data.tier,
-              cached: data.cached,
-              processingTimeMs: data.processingTimeMs,
-            },
-          };
-          
-          if (scanData.image) {
-            saveAnalysis(scanData.image, analysisResult as any);
+      // Handle SSE stream
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.substring(6);
+            try {
+              const event = JSON.parse(data);
+              
+              // Handle different event types
+              if (event.type === 'progress') {
+                console.log('[Scan Page] Progress:', event.message);
+                // Update progress state
+                setProgressSteps(prev => [...prev, {
+                  type: event.stage || 'progress',
+                  message: event.message || 'Processing...',
+                  timestamp: event.timestamp || Date.now(),
+                }]);
+              } else if (event.type === 'partial') {
+                console.log('[Scan Page] Partial result:', event.data);
+                setPartialResult(event.data);
+              } else if (event.type === 'complete') {
+                console.log('[Scan Page] 📥 Scan complete:', event.data);
+                setResult(event.data);
+                
+                if (event.data.success && event.data.product) {
+                  // Save successful scan to history
+                  try {
+                    const analysisResult = {
+                      products: [{
+                        productName: event.data.product.name,
+                        brand: event.data.product.brand,
+                        category: event.data.product.category,
+                        barcode: event.data.product.barcode,
+                        size: event.data.product.size,
+                        confidence: event.data.confidenceScore,
+                        dimensions: event.data.dimensionAnalysis?.dimensions || {},
+                      }],
+                      metadata: {
+                        tier: event.data.tier,
+                        cached: event.data.cached,
+                        processingTimeMs: event.data.processingTimeMs,
+                      },
+                    };
+                    
+                    if (scanData.image) {
+                      saveAnalysis(scanData.image, analysisResult as any);
+                    }
+                  } catch (storageError) {
+                    console.warn('Failed to save to localStorage:', storageError);
+                  }
+                }
+              } else if (event.type === 'error') {
+                console.error('[Scan Page] Error event:', event.error);
+                setError({
+                  message: event.error?.message || 'Scan failed',
+                  code: event.error?.code,
+                  timestamp: new Date(),
+                  context: {
+                    barcode: scanData.barcode,
+                    tier: devUserTier,
+                  },
+                });
+              }
+            } catch (parseError) {
+              console.error('[Scan Page] Error parsing event:', parseError);
+            }
           }
-        } catch (storageError) {
-          console.warn('Failed to save to localStorage:', storageError);
         }
       }
     } catch (err) {
@@ -511,12 +573,27 @@ export default function ScanPage() {
           </div>
         )}
 
-        {/* Loading State */}
+        {/* Loading State with Progress Tracker */}
         {loading && (
-          <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-lg font-medium text-gray-700">Identifying product...</p>
-            <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
+          <div className="space-y-4">
+            {/* Progress Tracker */}
+            {progressSteps.length > 0 && (
+              <ProgressTracker
+                steps={progressSteps}
+                isActive={loading}
+                partialResult={partialResult}
+                error={error?.message || null}
+              />
+            )}
+            
+            {/* Fallback loading spinner if no progress yet */}
+            {progressSteps.length === 0 && (
+              <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
+                <p className="text-lg font-medium text-gray-700">Identifying product...</p>
+                <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
+              </div>
+            )}
           </div>
         )}
 

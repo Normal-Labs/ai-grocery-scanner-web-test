@@ -25,6 +25,7 @@ import {
   logDimensionMetrics,
   calculateDimensionAnalysisCost,
 } from '@/lib/services/dimension-metrics';
+import type { IProgressEmitter } from '../progress/ProgressEmitter';
 
 /**
  * Integration Layer class
@@ -42,11 +43,13 @@ export class IntegrationLayer {
    * 
    * @param request - Scan request with barcode/image
    * @param skipDimensionAnalysis - Optional flag to skip dimension analysis
+   * @param progressEmitter - Optional progress emitter for real-time updates
    * @returns Extended scan response with product and dimension data
    */
   async processScan(
     request: ScanRequest,
-    skipDimensionAnalysis: boolean = false
+    skipDimensionAnalysis: boolean = false,
+    progressEmitter?: IProgressEmitter
   ): Promise<ExtendedScanResponse> {
     const startTime = Date.now();
 
@@ -58,7 +61,7 @@ export class IntegrationLayer {
       imageHash: request.imageHash,
       userId: request.userId,
       sessionId: request.sessionId,
-    });
+    }, progressEmitter);
 
     // If identification failed, return early
     if (!identificationResult.success || !identificationResult.product) {

@@ -26,6 +26,8 @@ import {
   ConfidenceScore,
   ImageData,
 } from '@/lib/types/multi-tier';
+import type { IProgressEmitter } from '../progress/ProgressEmitter';
+import { MultiTierStage, STAGE_MESSAGES } from '../progress/ProgressEmitter';
 
 /**
  * Scan Orchestrator class
@@ -66,9 +68,10 @@ export class ScanOrchestratorMultiTier {
    * Requirement 6.1, 6.2, 6.3, 6.4, 6.5: Tier selection and fallback logic
    * 
    * @param request - Scan request with barcode, image, and user info
+   * @param progressEmitter - Optional progress emitter for real-time updates
    * @returns Promise resolving to scan response
    */
-  async scan(request: ScanRequest): Promise<ScanResponse> {
+  async scan(request: ScanRequest, progressEmitter?: IProgressEmitter): Promise<ScanResponse> {
     const startTime = Date.now();
     
     console.log('[Scan Orchestrator] 🚀 Starting scan:', {
@@ -82,6 +85,13 @@ export class ScanOrchestratorMultiTier {
       // Tier 1: Direct barcode scanning
       // Requirement 6.1: Attempt Tier 1 first
       if (request.barcode) {
+        // Emit Tier 1 progress
+        progressEmitter?.emit(
+          MultiTierStage.TIER1_CACHE,
+          STAGE_MESSAGES[MultiTierStage.TIER1_CACHE],
+          { tier: 1 }
+        );
+        
         const tier1Result = await this.attemptTier1(request.barcode);
         if (tier1Result) {
           const processingTimeMs = Date.now() - startTime;
@@ -98,7 +108,8 @@ export class ScanOrchestratorMultiTier {
             1.0
           );
           
-          return {
+          // Emit final result
+          const result = {
             success: true,
             product: tier1Result.product,
             tier: 1,
@@ -106,6 +117,10 @@ export class ScanOrchestratorMultiTier {
             processingTimeMs,
             cached: tier1Result.cached,
           };
+          
+          progressEmitter?.emitFinalResult(result);
+          
+          return result;
         } else {
           // Log Tier 1 failure
           const processingTimeMs = Date.now() - startTime;
@@ -119,6 +134,13 @@ export class ScanOrchestratorMultiTier {
             undefined,
             'NOT_FOUND'
           );
+          
+          // Emit tier transition
+          progressEmitter?.emit(
+            MultiTierStage.TIER_TRANSITION,
+            STAGE_MESSAGES[MultiTierStage.TIER_TRANSITION],
+            { fromTier: 1, toTier: 2 }
+          );
         }
       }
 
@@ -126,6 +148,13 @@ export class ScanOrchestratorMultiTier {
       // Requirement 6.2: Fallback to Tier 2 if Tier 1 fails
       let tier2Metadata = null;
       if (request.image) {
+        // Emit Tier 2 progress
+        progressEmitter?.emit(
+          MultiTierStage.TIER2_EXTRACT,
+          STAGE_MESSAGES[MultiTierStage.TIER2_EXTRACT],
+          { tier: 2 }
+        );
+        
         const tier2Result = await this.attemptTier2(request.image, request.imageHash);
         if (tier2Result && 'product' in tier2Result) {
           const processingTimeMs = Date.now() - startTime;
@@ -147,7 +176,7 @@ export class ScanOrchestratorMultiTier {
             ? 'Low confidence match. Please verify the product details.'
             : undefined;
           
-          return {
+          const result = {
             success: true,
             product: tier2Result.product,
             tier: 2,
@@ -156,6 +185,10 @@ export class ScanOrchestratorMultiTier {
             cached: false,
             warning,
           };
+          
+          progressEmitter?.emitFinalResult(result);
+          
+          return result;
         }
         // Preserve metadata for Tier 3 even if Tier 2 didn't find a match
         if (tier2Result && 'metadata' in tier2Result) {
@@ -173,6 +206,13 @@ export class ScanOrchestratorMultiTier {
             undefined,
             'NO_MATCH'
           );
+          
+          // Emit tier transition
+          progressEmitter?.emit(
+            MultiTierStage.TIER_TRANSITION,
+            STAGE_MESSAGES[MultiTierStage.TIER_TRANSITION],
+            { fromTier: 2, toTier: 3 }
+          );
         } else if (!tier2Result) {
           // Log Tier 2 failure (extraction failed)
           const processingTimeMs = Date.now() - startTime;
@@ -186,6 +226,13 @@ export class ScanOrchestratorMultiTier {
             undefined,
             'EXTRACTION_FAILED'
           );
+          
+          // Emit tier transition
+          progressEmitter?.emit(
+            MultiTierStage.TIER_TRANSITION,
+            STAGE_MESSAGES[MultiTierStage.TIER_TRANSITION],
+            { fromTier: 2, toTier: 4 }
+          );
         }
       }
 
@@ -193,6 +240,13 @@ export class ScanOrchestratorMultiTier {
       // Requirement 6.3: Fallback to Tier 3 if Tier 2 fails
       // Use metadata from Tier 2 to discover barcode via API
       if (request.image && tier2Metadata) {
+        // Emit Tier 3 progress
+        progressEmitter?.emit(
+          MultiTierStage.TIER3_DISCOVER,
+          STAGE_MESSAGES[MultiTierStage.TIER3_DISCOVER],
+          { tier: 3 }
+        );
+        
         const tier3Result = await this.attemptTier3(tier2Metadata, request.imageHash);
         if (tier3Result) {
           const processingTimeMs = Date.now() - startTime;
@@ -214,7 +268,7 @@ export class ScanOrchestratorMultiTier {
             ? 'Product identified via barcode discovery. Please verify the details.'
             : undefined;
           
-          return {
+          const result = {
             success: true,
             product: tier3Result.product,
             tier: 3,
@@ -223,6 +277,10 @@ export class ScanOrchestratorMultiTier {
             cached: false,
             warning,
           };
+          
+          progressEmitter?.emitFinalResult(result);
+          
+          return result;
         } else {
           // Log Tier 3 failure
           const processingTimeMs = Date.now() - startTime;
@@ -236,12 +294,26 @@ export class ScanOrchestratorMultiTier {
             undefined,
             'DISCOVERY_FAILED'
           );
+          
+          // Emit tier transition
+          progressEmitter?.emit(
+            MultiTierStage.TIER_TRANSITION,
+            STAGE_MESSAGES[MultiTierStage.TIER_TRANSITION],
+            { fromTier: 3, toTier: 4 }
+          );
         }
       }
 
       // Tier 4: Comprehensive image analysis
       // Requirement 6.4: Fallback to Tier 4 if all else fails
       if (request.image) {
+        // Emit Tier 4 progress
+        progressEmitter?.emit(
+          MultiTierStage.TIER4_ANALYZE,
+          STAGE_MESSAGES[MultiTierStage.TIER4_ANALYZE],
+          { tier: 4 }
+        );
+        
         // Add a delay to avoid hitting rate limits if we just called Gemini in Tier 2
         // Note: Even paid Tier 1 accounts have a known bug where they're throttled at free-tier limits (15 RPM)
         // This 10-second delay helps work around the bug by spacing out requests
@@ -273,7 +345,7 @@ export class ScanOrchestratorMultiTier {
             ? 'AI-based identification. Please verify the product details.'
             : undefined;
           
-          return {
+          const result = {
             success: true,
             product: tier4Result.product,
             tier: 4,
@@ -282,6 +354,10 @@ export class ScanOrchestratorMultiTier {
             cached: false,
             warning,
           };
+          
+          progressEmitter?.emitFinalResult(result);
+          
+          return result;
         } else {
           // Log Tier 4 failure
           const processingTimeMs = Date.now() - startTime;

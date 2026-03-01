@@ -203,12 +203,21 @@ export class ProgressManager {
 
     console.log(`[ProgressManager] Cleaning up session: ${sessionId}`);
 
-    // Close stream controller
+    // Close stream controller if it exists and is not already closed
     if (session.controller) {
       try {
-        session.controller.close();
+        // Check if the controller's desiredSize is null (indicates it's closed)
+        // @ts-ignore - desiredSize exists but TypeScript doesn't know about it
+        if (session.controller.desiredSize !== null) {
+          session.controller.close();
+        }
       } catch (error) {
-        console.error(`[ProgressManager] Error closing stream controller:`, error);
+        // Ignore errors if controller is already closed
+        if (error instanceof Error && error.message.includes('already closed')) {
+          // Expected - controller was already closed
+        } else {
+          console.error(`[ProgressManager] Error closing stream controller:`, error);
+        }
       }
     }
 

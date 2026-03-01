@@ -298,7 +298,7 @@ export default function ProgressTracker({
                 const info = STEP_INFO[step.type];
                 return (
                   <div
-                    key={step.timestamp}
+                    key={`${step.timestamp}-${index}`}
                     className="flex items-start gap-2 text-sm py-2 border-l-2 border-gray-200 pl-3"
                   >
                     <span className="text-base flex-shrink-0" role="img" aria-label={step.type}>
