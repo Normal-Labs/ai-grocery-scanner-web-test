@@ -313,21 +313,21 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
 - [ ] 12. Checkpoint - Ensure all API endpoints are working
   - Ensure all tests pass, ask the user if questions arise.
 
-- [ ] 13. Phase 5: UI Components - Core Display Components
-  - [~] 13.1 Create HealthScoreBadge component
+- [x] 13. Phase 5: UI Components - Core Display Components
+  - [x] 13.1 Create HealthScoreBadge component
     - Implement `src/components/HealthScoreBadge.tsx`
     - Display health score with color coding (green/yellow/red)
     - Support size variants: small, medium, large
     - Optional explanation display
     - _Requirements: 7.1_
   
-  - [~] 13.2 Create NutritionFactsTable component
+  - [x] 13.2 Create NutritionFactsTable component
     - Implement `src/components/NutritionFactsTable.tsx`
     - Display all nutritional values in table format
     - Show confidence indicators for uncertain fields
     - _Requirements: 7.2, 8.4_
   
-  - [~] 13.3 Create IngredientListDisplay component
+  - [x] 13.3 Create IngredientListDisplay component
     - Implement `src/components/IngredientListDisplay.tsx`
     - Display ingredient list with order preserved
     - Highlight allergens in red
@@ -340,8 +340,8 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - Test IngredientListDisplay highlighting
     - _Requirements: 7.1-7.5_
 
-- [ ] 14. Phase 5: UI Components - Main Display Component
-  - [~] 14.1 Create NutritionInsightsDisplay component
+- [x] 14. Phase 5: UI Components - Main Display Component
+  - [x] 14.1 Create NutritionInsightsDisplay component
     - Implement `src/components/NutritionInsightsDisplay.tsx`
     - Integrate HealthScoreBadge, NutritionFactsTable, IngredientListDisplay
     - Display allergen warnings prominently if present
@@ -349,14 +349,14 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - Add expandable sections for detailed breakdown
     - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.7_
   
-  - [~] 14.2 Add error and warning displays
+  - [x] 14.2 Add error and warning displays
     - Show warning icons for uncertain fields
     - Display error messages for OCR failures
     - Add "Retake Photo" button
     - Display helpful tips for better image capture
     - _Requirements: 8.1, 8.2, 8.3, 8.4, 8.6, 8.7_
   
-  - [~] 14.3 Implement accessibility features
+  - [x] 14.3 Implement accessibility features
     - Add ARIA labels and roles
     - Ensure keyboard navigation works
     - Test with screen readers
@@ -373,20 +373,20 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - **Property 30: Complete Nutrition UI Rendering**
     - **Validates: Requirements 7.2, 7.3, 7.4, 7.5, 7.7**
 
-- [ ] 15. Phase 5: UI Components - Integration
-  - [~] 15.1 Integrate NutritionInsightsDisplay into scan results page
+- [x] 15. Phase 5: UI Components - Integration
+  - [x] 15.1 Integrate NutritionInsightsDisplay into scan results page
     - Update scan results page to conditionally render NutritionInsightsDisplay for nutrition scans
     - Maintain existing InsightsDisplay for product/barcode scans
     - _Requirements: 5.4, 7.1-7.9_
   
-  - [~] 15.2 Add nutrition scan history view
+  - [x] 15.2 Add nutrition scan history view
     - Create history cards for nutrition scans
     - Display health score, product name, timestamp
     - Allow filtering by scan type
     - Support date sorting (ascending/descending)
     - _Requirements: 5.6, 6.7_
   
-  - [~] 15.3 Implement product profile merging
+  - [x] 15.3 Implement product profile merging
     - When both product and nutrition scans exist for same product, merge into single view
     - Display product info + nutrition data + health score
     - _Requirements: 5.7_

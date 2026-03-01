@@ -29,7 +29,34 @@ Features:
 - ✅ Metrics logging and aggregation
 - ✅ SmartBadge UI component with score-based color coding
 
+### Nutritional Health Analysis System
+Specialized nutrition label scanning with OCR and health scoring:
+- **Image Classification**: Automatic detection of nutrition labels vs product images
+- **OCR Extraction**: Gemini Vision-powered text extraction from nutrition facts
+- **Ingredient Parsing**: Tokenization with allergen and additive detection
+- **Health Scoring**: 0-100 score based on nutritional content and ingredients
+- **Smart UI**: Expandable sections for score breakdown, nutrition facts, and ingredients
+
+Features:
+- ✅ Cache-first workflow with 30-day TTL
+- ✅ Parallel parsing (nutrition + ingredients)
+- ✅ Allergen detection (8 major allergens)
+- ✅ Additive detection (preservatives, sweeteners, colors)
+- ✅ Nutritional data validation
+- ✅ Progress tracking with simulated updates
+- ✅ Supabase integration for product storage
+- ✅ MongoDB caching by image hash
+- ✅ Accessible UI components (WCAG 2.1 AA)
+
 ## 📋 Optional Enhancements
+
+### Nutritional Health Analysis (Phase 6-7)
+- [ ] Micronutrient analysis for premium tier
+- [ ] Ingredient research with Tavily search
+- [ ] Product category comparison
+- [ ] Personalized recommendations
+- [ ] Manual correction UI for OCR errors
+- [ ] Performance optimization (image compression, cache warming)
 
 ### Monitoring & Cost Management
 - [ ] Enhanced API usage and cost tracking
@@ -73,6 +100,11 @@ Features:
 | Tier 4 Analysis | <5s | ✅ ~3-5s |
 | Cached Dimension | <5s | ✅ <1s |
 | Fresh Dimension | <12s | ✅ ~3-5s |
+| Nutrition Classification | <2s | ✅ ~1-2s |
+| Nutrition OCR | <3s | ✅ ~2-3s |
+| Health Scoring | <100ms | ✅ <100ms |
+| Cached Nutrition | <1s | ✅ <500ms |
+| Fresh Nutrition Analysis | <5s | ✅ ~3-5s |
 
 ## 🧪 Testing
 

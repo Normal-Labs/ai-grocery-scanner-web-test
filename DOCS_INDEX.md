@@ -11,6 +11,7 @@ Quick reference to all documentation files in this project.
 ## Deployment
 
 - **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
+- **[NUTRITION_ANALYSIS_DEPLOYMENT.md](NUTRITION_ANALYSIS_DEPLOYMENT.md)** - Nutrition analysis feature deployment checklist
 - **[MONGODB_SETUP.md](MONGODB_SETUP.md)** - Step-by-step MongoDB Atlas configuration
 - **[MONGODB_TROUBLESHOOTING.md](MONGODB_TROUBLESHOOTING.md)** - Detailed MongoDB connection troubleshooting
 - **[REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)** - Quick reference for critical environment variables
@@ -24,6 +25,7 @@ Quick reference to all documentation files in this project.
 - **[SCANNER_USAGE.md](SCANNER_USAGE.md)** - How to use the barcode scanner
 - **[MULTI_TIER_TESTING.md](MULTI_TIER_TESTING.md)** - Testing guide for all 4 tiers
 - **[DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)** - Development tier toggle for testing dimension analysis
+- **[scripts/TESTING_GUIDE.md](scripts/TESTING_GUIDE.md)** - Nutrition analysis feature testing guide
 
 ## Technical Documentation
 
@@ -43,6 +45,12 @@ Quick reference to all documentation files in this project.
   - `design.md` - Architecture and design
   - `tasks.md` - Implementation task list
 
+### Nutritional Health Analysis
+- **[.kiro/specs/nutritional-health-analysis/](/.kiro/specs/nutritional-health-analysis/)**
+  - `requirements.md` - Nutrition analysis requirements
+  - `design.md` - Architecture and design
+  - `tasks.md` - Implementation task list
+
 ## Database
 
 - **[supabase/migrations/](supabase/migrations/)** - Database schema migrations
@@ -50,6 +58,7 @@ Quick reference to all documentation files in this project.
   - `20260225000000_multi_tier_schema.sql` - Multi-tier scan logging
   - `20260226000000_dimension_analysis_schema.sql` - Dimension analysis fields
   - `20260227000000_fix_product_search.sql` - Improved product duplicate detection
+  - `add_nutrition_fields_to_products.sql` - Nutrition data fields for products table
 
 ## Quick Links
 
@@ -61,5 +70,6 @@ Quick reference to all documentation files in this project.
 - **Understand the system**: Check [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
 - **Test the system**: Use [MULTI_TIER_TESTING.md](MULTI_TIER_TESTING.md)
 - **Test dimension analysis**: Read [DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)
+- **Test nutrition analysis**: Follow [scripts/TESTING_GUIDE.md](scripts/TESTING_GUIDE.md)
 - **See implementation details**: Check spec files in `.kiro/specs/`
 - **Optimize costs**: Review [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md)

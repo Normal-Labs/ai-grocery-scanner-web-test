@@ -11,6 +11,7 @@ import { useState, useEffect } from 'react';
 import BarcodeScanner from '@/components/BarcodeScanner';
 import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedErrorDisplay';
 import ProgressTracker from '@/components/ProgressTracker';
+import NutritionInsightsDisplay from '@/components/NutritionInsightsDisplay';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
 
@@ -72,6 +73,7 @@ export default function ScanPage() {
   const [scanning, setScanning] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
+  const [nutritionResult, setNutritionResult] = useState<any>(null); // Store nutrition analysis result separately
   const [error, setError] = useState<ErrorDetails | null>(null);
   const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('premium');
   const [showHistory, setShowHistory] = useState(false);
@@ -103,6 +105,7 @@ export default function ScanPage() {
     setLoading(true);
     setError(null);
     setResult(null);
+    setNutritionResult(null); // Reset nutrition result
     setProgressSteps([]); // Reset progress
     setPartialResult(null); // Reset partial result
     setTimeoutWarning(false); // Reset timeout warning
@@ -244,9 +247,11 @@ export default function ScanPage() {
             timestamp: Date.now(),
           }]);
           
-          // Transform nutrition response to match ScanResult interface
+          // Store nutrition analysis result
           if (data.success) {
-            // Create a result that matches the ScanResult interface
+            setNutritionResult(data.data); // Store full nutrition data
+            
+            // Also create a basic result for compatibility
             const nutritionResult: ScanResult = {
               success: true,
               product: {
@@ -784,6 +789,14 @@ export default function ScanPage() {
         {/* Result Display */}
         {result && !loading && (
           <div className="space-y-4">
+            {/* Nutrition Analysis Display */}
+            {nutritionResult ? (
+              <NutritionInsightsDisplay
+                result={nutritionResult}
+                showDetails={true}
+              />
+            ) : (
+              <>
             {/* Success/Failure Badge */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <div className="flex items-center justify-between mb-4">
@@ -1004,6 +1017,8 @@ export default function ScanPage() {
               >
                 ⚠️ Report Incorrect Identification
               </button>
+            )}
+            </>
             )}
           </div>
         )}

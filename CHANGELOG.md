@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added - 2026-03-01
+
+#### Nutritional Health Analysis Feature
+- **Complete nutrition label scanning system** with OCR and health scoring
+  - Image classification to detect nutrition labels vs product images
+  - Gemini Vision-powered OCR for nutrition facts extraction
+  - Ingredient list parsing with allergen and additive detection
+  - Health scoring algorithm (0-100) based on nutritional content
+  - Cache-first workflow with 30-day TTL in MongoDB
+  - Supabase integration for product storage with nutrition data
+
+- **New Services**:
+  - `ImageClassifier`: Classifies images as barcode/product/nutrition_label
+  - `NutritionParser`: Extracts nutritional facts from labels with validation
+  - `IngredientParser`: Parses ingredients, detects allergens and additives
+  - `HealthScorer`: Calculates health scores with detailed breakdown
+  - `NutritionOrchestrator`: Orchestrates cache-first nutrition analysis workflow
+
+- **New UI Components**:
+  - `HealthScoreBadge`: Color-coded health score display (0-100)
+  - `NutritionFactsTable`: Complete nutrition facts with confidence indicators
+  - `IngredientListDisplay`: Ingredient list with allergen/additive highlighting
+  - `NutritionInsightsDisplay`: Main component integrating all nutrition UI
+
+- **New API Endpoints**:
+  - `POST /api/classify-image`: Image classification endpoint
+  - `POST /api/analyze-nutrition`: Nutrition analysis endpoint with rate limiting
+
+- **Database Updates**:
+  - Added nutrition_data, health_score, has_allergens, allergen_types to products table
+  - Created nutrition_cache collection in MongoDB
+  - Added scan_history support for nutrition scans
+
+- **Features**:
+  - Allergen detection for 8 major allergens (milk, eggs, fish, shellfish, tree nuts, peanuts, wheat, soybeans)
+  - Additive detection (preservatives, sweeteners, artificial colors)
+  - Nutritional data validation (calorie calculation, serving size, daily values)
+  - Progress tracking with simulated updates
+  - Expandable sections for detailed breakdowns
+  - Accessible UI (WCAG 2.1 AA compliant)
+  - Comprehensive testing guide at `scripts/TESTING_GUIDE.md`
+
 ### Added - 2026-02-28
 
 #### Documentation Improvements
