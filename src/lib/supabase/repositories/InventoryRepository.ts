@@ -443,6 +443,11 @@ export class InventoryRepository {
           image_url: null,
           metadata: null,
           flagged_for_review: false,
+          nutrition_data: null,
+          health_score: null,
+          has_allergens: false,
+          allergen_types: [],
+          last_scanned_at: null,
           created_at: row.product_created_at,
           updated_at: row.product_updated_at,
         };

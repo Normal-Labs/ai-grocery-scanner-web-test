@@ -55,10 +55,33 @@ export interface Database {
 // ============================================================================
 
 /**
+ * Nutritional data structure stored in products.nutrition_data JSONB column
+ */
+export interface ProductNutritionData {
+  servingSize: {
+    amount: number;
+    unit: string;
+  };
+  calories: number;
+  macros: {
+    fat: number;
+    saturatedFat: number;
+    transFat: number;
+    carbs: number;
+    fiber: number;
+    sugars: number;
+    protein: number;
+  };
+  sodium: number;
+  lastUpdated: string; // ISO timestamp
+}
+
+/**
  * Product table row type
  * Represents a product in the canonical product registry
  * 
  * Requirement 1.5: Products table with extended fields for multi-tier system
+ * Requirements 6.1, 6.2, 6.3: Extended with nutrition fields
  */
 export interface Product {
   /** Unique identifier (UUID) */
@@ -79,6 +102,16 @@ export interface Product {
   metadata: Record<string, any> | null;
   /** Flag for manual review */
   flagged_for_review: boolean;
+  /** Nutritional data from nutrition label scanning */
+  nutrition_data: ProductNutritionData | null;
+  /** Calculated health score (0-100) */
+  health_score: number | null;
+  /** Flag indicating if product contains allergens */
+  has_allergens: boolean;
+  /** Array of allergen types present in product */
+  allergen_types: string[];
+  /** Timestamp of last scan */
+  last_scanned_at: string | null;
   /** Timestamp of creation */
   created_at: string;
   /** Timestamp of last update */
@@ -106,6 +139,14 @@ export interface ProductInsert {
   metadata?: Record<string, any> | null;
   /** Flag for manual review (optional, defaults to false) */
   flagged_for_review?: boolean;
+  /** Nutritional data (optional) */
+  nutrition_data?: ProductNutritionData | null;
+  /** Health score (optional) */
+  health_score?: number | null;
+  /** Has allergens flag (optional, defaults to false) */
+  has_allergens?: boolean;
+  /** Allergen types array (optional, defaults to empty array) */
+  allergen_types?: string[];
 }
 
 /**
@@ -129,6 +170,14 @@ export interface ProductUpdate {
   metadata?: Record<string, any> | null;
   /** Flag for manual review (optional) */
   flagged_for_review?: boolean;
+  /** Nutritional data (optional) */
+  nutrition_data?: ProductNutritionData | null;
+  /** Health score (optional) */
+  health_score?: number | null;
+  /** Has allergens flag (optional) */
+  has_allergens?: boolean;
+  /** Allergen types array (optional) */
+  allergen_types?: string[];
   /** Timestamp of last update (optional, auto-updated by trigger) */
   updated_at?: string;
 }
@@ -380,6 +429,10 @@ export function isProduct(value: unknown): value is Product {
     (typeof obj.image_url === 'string' || obj.image_url === null) &&
     (typeof obj.metadata === 'object' || obj.metadata === null) &&
     typeof obj.flagged_for_review === 'boolean' &&
+    (typeof obj.nutrition_data === 'object' || obj.nutrition_data === null) &&
+    (typeof obj.health_score === 'number' || obj.health_score === null) &&
+    typeof obj.has_allergens === 'boolean' &&
+    Array.isArray(obj.allergen_types) &&
     typeof obj.created_at === 'string' &&
     typeof obj.updated_at === 'string'
   );
