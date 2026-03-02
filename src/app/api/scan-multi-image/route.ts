@@ -20,6 +20,7 @@ interface ScanMultiImageRequest {
   workflowMode: 'guided' | 'progressive';
   sessionId?: string;
   imageType?: ImageType; // Optional for guided mode
+  barcode?: string; // Optional barcode value from BarcodeDetector
 }
 
 /**
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
       workflowMode: body.workflowMode,
       sessionId: body.sessionId,
       imageType: body.imageType,
+      barcode: body.barcode,
       hasImage: !!body.imageData,
     });
     
@@ -70,7 +72,8 @@ export async function POST(request: NextRequest) {
       body.userId,
       body.workflowMode,
       body.sessionId,
-      body.imageType // Pass expected image type for guided mode
+      body.imageType, // Pass expected image type for guided mode
+      body.barcode // Pass barcode if available from BarcodeDetector
     );
     
     console.log('[API] ✅ Multi-image scan complete:', {

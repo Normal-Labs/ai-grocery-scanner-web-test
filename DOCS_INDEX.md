@@ -11,8 +11,9 @@ Quick reference to all documentation files in this project.
 
 ## Deployment
 
-- **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
 - **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-deployment verification checklist
+- **[BUILD_TEST_RESULTS.md](BUILD_TEST_RESULTS.md)** - Latest build status and testing results
+- **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
 - **[NUTRITION_ANALYSIS_DEPLOYMENT.md](NUTRITION_ANALYSIS_DEPLOYMENT.md)** - Nutrition analysis feature deployment checklist
 - **[MONGODB_SETUP.md](MONGODB_SETUP.md)** - Step-by-step MongoDB Atlas configuration
 - **[MONGODB_TROUBLESHOOTING.md](MONGODB_TROUBLESHOOTING.md)** - Detailed MongoDB connection troubleshooting
@@ -70,6 +71,7 @@ Quick reference to all documentation files in this project.
 
 ### I want to...
 - **Get started**: Read [SETUP.md](SETUP.md)
+- **Deploy to production**: Check [BUILD_TEST_RESULTS.md](BUILD_TEST_RESULTS.md) then follow [DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)
 - **Deploy to Vercel**: Follow [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)
 - **Set up MongoDB**: Use [MONGODB_SETUP.md](MONGODB_SETUP.md)
 - **See required env vars**: Check [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)
@@ -77,6 +79,7 @@ Quick reference to all documentation files in this project.
 - **Test the system**: Use [MULTI_TIER_TESTING.md](MULTI_TIER_TESTING.md)
 - **Test dimension analysis**: Read [DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)
 - **Test nutrition analysis**: Follow [scripts/TESTING_GUIDE.md](scripts/TESTING_GUIDE.md)
+- **Use Product Hero**: Read [PRODUCT_HERO.md](PRODUCT_HERO.md)
 - **See implementation details**: Check spec files in `.kiro/specs/`
 - **Optimize costs**: Review [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md)
 

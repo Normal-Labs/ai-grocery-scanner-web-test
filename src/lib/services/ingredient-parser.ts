@@ -332,6 +332,17 @@ Example:
    */
   private parseOCRResponse(responseText: string): { rawText: string; confidence: number } {
     try {
+      // Check if Gemini returned a plain text message (e.g., "There is no ingredient list visible")
+      // This happens when Gemini can't find an ingredient list in the image
+      if (!responseText.includes('{') && !responseText.includes('}')) {
+        console.warn('[IngredientParser] ⚠️  Gemini returned plain text (no JSON):', responseText);
+        // Return empty result with zero confidence
+        return {
+          rawText: '',
+          confidence: 0.0,
+        };
+      }
+      
       // Strip markdown code blocks if present
       let cleanedResponse = responseText.trim();
       const codeBlockMatch = cleanedResponse.match(/```(?:json)?\s*([\s\S]*?)\s*```/);

@@ -136,13 +136,16 @@ export default function ScanPage() {
   }) => {
     // Check if this is a guided capture with pending image type
     if (workflowMode === 'guided' && pendingGuidedImageType && scanData.image) {
-      console.log('[Scan Page] 📸 Guided capture via scanner:', pendingGuidedImageType);
+      console.log('[Scan Page] 📸 Guided capture via scanner:', {
+        imageType: pendingGuidedImageType,
+        hasBarcode: !!scanData.barcode,
+      });
       
       // Close scanner
       setShowScanner(false);
       
-      // Process through guided capture handler
-      await handleGuidedImageCapture(pendingGuidedImageType, scanData.image);
+      // Process through guided capture handler, passing barcode if available
+      await handleGuidedImageCapture(pendingGuidedImageType, scanData.image, scanData.barcode);
       
       // Clear pending type
       setPendingGuidedImageType(null);
@@ -674,12 +677,16 @@ export default function ScanPage() {
    * Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true
    * Requirements 2.1, 2.2: Call MultiImageOrchestrator.processImage() via API
    */
-  const handleGuidedImageCapture = async (imageType: ImageType, imageData: string) => {
+  const handleGuidedImageCapture = async (imageType: ImageType, imageData: string, barcode?: string) => {
     setLoading(true);
     setError(null);
     
     try {
-      console.log('[Scan Page] 📸 Guided capture:', { imageType, step: guidedCaptureStep });
+      console.log('[Scan Page] 📸 Guided capture:', { 
+        imageType, 
+        step: guidedCaptureStep,
+        hasBarcode: !!barcode,
+      });
       
       // Get userId from auth context
       const userId = user?.id || 'anonymous-' + Date.now();
@@ -704,6 +711,7 @@ export default function ScanPage() {
           workflowMode: 'guided',
           sessionId: effectiveSessionId,
           imageType,
+          barcode, // Pass barcode if available from BarcodeDetector
         }),
       });
       
@@ -760,23 +768,68 @@ export default function ScanPage() {
             productName: orchestratorResult.product.name,
             nutritionalFacts: {
               servingSize: orchestratorResult.product.nutrition_data.servingSize,
-              calories: { value: orchestratorResult.product.nutrition_data.calories, unit: 'kcal' },
-              totalFat: { value: orchestratorResult.product.nutrition_data.macros.fat, unit: 'g' },
-              saturatedFat: { value: orchestratorResult.product.nutrition_data.macros.saturatedFat, unit: 'g' },
-              transFat: { value: orchestratorResult.product.nutrition_data.macros.transFat, unit: 'g' },
-              totalCarbohydrates: { value: orchestratorResult.product.nutrition_data.macros.carbs, unit: 'g' },
-              dietaryFiber: { value: orchestratorResult.product.nutrition_data.macros.fiber, unit: 'g' },
-              totalSugars: { value: orchestratorResult.product.nutrition_data.macros.sugars, unit: 'g' },
-              protein: { value: orchestratorResult.product.nutrition_data.macros.protein, unit: 'g' },
-              sodium: { value: orchestratorResult.product.nutrition_data.sodium, unit: 'mg' },
+              calories: { 
+                value: orchestratorResult.product.nutrition_data.calories, 
+                confidence: 0.95 
+              },
+              totalFat: { 
+                value: orchestratorResult.product.nutrition_data.macros.fat, 
+                confidence: 0.95 
+              },
+              saturatedFat: { 
+                value: orchestratorResult.product.nutrition_data.macros.saturatedFat, 
+                confidence: 0.95 
+              },
+              transFat: { 
+                value: orchestratorResult.product.nutrition_data.macros.transFat, 
+                confidence: 0.95 
+              },
+              cholesterol: { 
+                value: 0, 
+                confidence: 0.5 
+              },
+              sodium: { 
+                value: orchestratorResult.product.nutrition_data.sodium, 
+                confidence: 0.95 
+              },
+              totalCarbohydrates: { 
+                value: orchestratorResult.product.nutrition_data.macros.carbs, 
+                confidence: 0.95 
+              },
+              dietaryFiber: { 
+                value: orchestratorResult.product.nutrition_data.macros.fiber, 
+                confidence: 0.95 
+              },
+              totalSugars: { 
+                value: orchestratorResult.product.nutrition_data.macros.sugars, 
+                confidence: 0.95 
+              },
+              protein: { 
+                value: orchestratorResult.product.nutrition_data.macros.protein, 
+                confidence: 0.95 
+              },
+              validationStatus: 'valid' as const,
             },
             ingredients: {
+              rawText: '',
               ingredients: orchestratorResult.product.allergen_types?.map((allergen: string) => ({
                 name: allergen,
                 isAllergen: true,
+                isPreservative: false,
+                isSweetener: false,
+                isArtificialColor: false,
               })) || [],
-              hasAllergens: orchestratorResult.product.has_allergens,
-              complete: true,
+              allergens: orchestratorResult.product.allergen_types?.map((allergen: string) => ({
+                name: allergen,
+                isAllergen: true,
+                isPreservative: false,
+                isSweetener: false,
+                isArtificialColor: false,
+              })) || [],
+              preservatives: [],
+              sweeteners: [],
+              artificialColors: [],
+              isComplete: true,
               confidence: 0.95,
             },
             healthScore: {
@@ -926,6 +979,65 @@ export default function ScanPage() {
               isProcessing={loading}
               error={error?.message}
             />
+          </div>
+        )}
+
+        {/* Guided Mode Results - Show after workflow completion */}
+        {workflowMode === 'guided' && guidedCaptureStep === 4 && result && !loading && (
+          <div className="space-y-4">
+            {/* Nutrition Analysis Display */}
+            {nutritionResult ? (
+              <NutritionInsightsDisplay
+                result={nutritionResult}
+                showDetails={true}
+              />
+            ) : (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <span className="inline-block px-4 py-2 rounded-full text-white font-semibold bg-green-500">
+                    ✓ Product Captured
+                  </span>
+                </div>
+                
+                <div className="space-y-4">
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">{result.product?.name || 'Unknown Product'}</h3>
+                    <p className="text-gray-600">{result.product?.brand || 'Unknown Brand'}</p>
+                    {result.product?.barcode && (
+                      <p className="text-sm text-gray-500 mt-1">Barcode: {result.product.barcode}</p>
+                    )}
+                  </div>
+                  
+                  {result.product?.size && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Size: </span>
+                      <span className="text-sm text-gray-600">{result.product.size}</span>
+                    </div>
+                  )}
+                  
+                  {result.product?.category && (
+                    <div>
+                      <span className="text-sm font-medium text-gray-700">Category: </span>
+                      <span className="text-sm text-gray-600">{result.product.category}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+            
+            {/* Start New Scan Button */}
+            <button
+              onClick={() => {
+                setGuidedCaptureStep(1);
+                setResult(null);
+                setNutritionResult(null);
+                setSessionId(null);
+                setCapturedImageTypes([]);
+              }}
+              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+            >
+              Start New Scan
+            </button>
           </div>
         )}
 

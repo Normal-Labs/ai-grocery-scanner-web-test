@@ -393,7 +393,8 @@ export class NutritionOrchestrator {
 
       // Parse nutrition and ingredients in parallel with retry logic
       // Requirement 8.1: Retry logic with exponential backoff for API failures
-      [nutritionalFacts, ingredients] = await Promise.all([
+      // Note: Ingredient parsing is optional - if it fails, continue with nutrition facts only
+      const [nutritionResult, ingredientResult] = await Promise.allSettled([
         withRetry(
           async () => await this.nutritionParser.parse(request.imageData),
           this.MAX_RETRIES,
@@ -405,22 +406,54 @@ export class NutritionOrchestrator {
           this.RETRY_DELAY_MS
         ),
       ]);
+      
+      // Check nutrition parsing result (required)
+      if (nutritionResult.status === 'rejected') {
+        console.error('[NutritionOrchestrator] ❌ Nutrition parsing failed:', nutritionResult.reason);
+        throw this.createError(
+          'OCR_FAILED',
+          'Unable to read the nutrition label. Please ensure the label is clearly visible and well-lit, then try again.',
+          nutritionResult.reason
+        );
+      }
+      
+      nutritionalFacts = nutritionResult.value;
+      
+      // Check ingredient parsing result (optional)
+      if (ingredientResult.status === 'rejected') {
+        console.warn('[NutritionOrchestrator] ⚠️  Ingredient parsing failed, continuing without ingredients:', ingredientResult.reason);
+        // Create empty ingredient list with all required fields
+        ingredients = {
+          rawText: '',
+          ingredients: [],
+          allergens: [],
+          preservatives: [],
+          sweeteners: [],
+          artificialColors: [],
+          isComplete: false,
+          confidence: 0.0,
+        };
+      } else {
+        ingredients = ingredientResult.value;
+      }
 
       console.log('[NutritionOrchestrator] ✅ Parallel parsing complete:', {
         nutritionStatus: nutritionalFacts.validationStatus,
         ingredientCount: ingredients.ingredients.length,
         allergenCount: ingredients.allergens.length,
+        ingredientsAvailable: ingredientResult.status === 'fulfilled',
       });
     } catch (error) {
-      // Requirement 8.2: Handle OCR errors with user-friendly messages
-      console.error('[NutritionOrchestrator] ❌ OCR parsing failed:', {
+      // This catch is for unexpected errors, not parsing failures
+      // Parsing failures are now handled above with Promise.allSettled
+      console.error('[NutritionOrchestrator] ❌ Unexpected error during parsing:', {
         error: error instanceof Error ? error.message : String(error),
         timestamp: new Date().toISOString(),
       });
 
       throw this.createError(
-        'OCR_FAILED',
-        'Unable to read the nutrition label. Please ensure the label is clearly visible and well-lit, then try again.',
+        'UNEXPECTED_ERROR',
+        'An unexpected error occurred while processing the nutrition label. Please try again.',
         error
       );
     }
@@ -527,11 +560,26 @@ export class NutritionOrchestrator {
    * @returns Extracted product name or undefined
    */
   private extractProductName(ingredients: IngredientList): string | undefined {
-    // Check if raw text starts with "INGREDIENTS:" pattern and strip it
-    let rawText = ingredients.rawText;
+    // Check if raw text exists and is not empty
+    if (!ingredients.rawText || ingredients.rawText.trim() === '') {
+      // No raw text available, try to use parsed ingredients
+      if (ingredients.ingredients.length >= 2) {
+        const firstTwo = ingredients.ingredients.slice(0, 2).map(i => i.name);
+        const descriptiveName = firstTwo.join(' & ');
+        return this.capitalizeProductName(descriptiveName) + ' Product';
+      }
+      
+      if (ingredients.ingredients.length === 1) {
+        const ingredient = ingredients.ingredients[0].name;
+        return this.capitalizeProductName(ingredient) + ' Product';
+      }
+      
+      // No ingredients available
+      return undefined;
+    }
     
     // Strip "INGREDIENTS:" prefix if present
-    rawText = rawText.replace(/^INGREDIENTS:\s*/i, '');
+    let rawText = ingredients.rawText.replace(/^INGREDIENTS:\s*/i, '');
     
     // Pattern 1: If we have multiple ingredients, create a descriptive name from first 2 ingredients
     if (ingredients.ingredients.length >= 2) {

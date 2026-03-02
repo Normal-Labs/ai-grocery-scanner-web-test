@@ -477,14 +477,21 @@ The core Product Hero functionality is complete and working. Remaining optional 
   - Now shows nutrition analysis and product results after completion
   - User sees complete product profile with all captured data
 
-- [x] **12.17 Fix session retrieval causing duplicate products**
-  - Problem: Multiple products created for single workflow (3 products instead of 1)
-  - Root cause: `getActiveSession(userId)` retrieved ANY active session, not the specific one
-  - Session productId wasn't being preserved across image captures
-  - Solution: Added `getSessionById(sessionId)` method to SessionManager
-  - Updated orchestrator to use specific session lookup by sessionId
-  - Ensures session productId is maintained throughout workflow
-  - Prevents duplicate product creation
+- [x] **12.17 Fix session retrieval and duplicate product creation**
+  - Problem: Multiple products created for single workflow (2-3 products instead of 1)
+  - Root causes:
+    1. `getActiveSession(userId)` retrieved ANY active session, not the specific one
+    2. ScanOrchestratorMultiTier (Tier 4) creates a product, then DataMerger creates ANOTHER product
+  - Timeline: Product A created at 14:07:04.018, Product B created at 14:07:04.815 (0.8s later)
+  - Solution Part 1: Added `getSessionById(sessionId)` method to SessionManager
+  - Solution Part 2: Modified MultiImageOrchestrator to check if analyzer returned a product
+  - When ScanOrchestratorMultiTier creates/finds a product, include productId in metadata
+  - Before calling ProductMatcher, check if analyzer provided a product ID
+  - If product ID exists, fetch that product and use it directly (skip matcher)
+  - Only call ProductMatcher if analyzer didn't provide a product
+  - This prevents DataMerger from creating a duplicate product
+  - **Status**: ✅ Fixed - tested in dev and prod, only ONE product created per workflow
+  - Files changed: SessionManager.ts, MultiImageOrchestrator.ts
 
 - [x] **12.18 Add barcode extraction fallback for Product Hero**
   - Problem: Barcode extraction failing consistently in production (past 2 days)

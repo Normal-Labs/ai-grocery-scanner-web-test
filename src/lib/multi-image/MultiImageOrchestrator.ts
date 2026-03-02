@@ -86,6 +86,8 @@ export class MultiImageOrchestrator {
    * @param userId - User ID from Supabase Auth
    * @param workflowMode - Workflow type (guided or progressive)
    * @param sessionId - Optional existing session ID
+   * @param expectedImageType - Optional expected image type (for guided mode)
+   * @param detectedBarcode - Optional barcode value from BarcodeDetector
    * @returns Promise resolving to ProcessImageResult
    */
   async processImage(
@@ -93,7 +95,8 @@ export class MultiImageOrchestrator {
     userId: string,
     workflowMode: 'guided' | 'progressive',
     sessionId?: string,
-    expectedImageType?: ImageType
+    expectedImageType?: ImageType,
+    detectedBarcode?: string
   ): Promise<ProcessImageResult> {
     const startTime = Date.now();
     
@@ -102,6 +105,7 @@ export class MultiImageOrchestrator {
       workflowMode,
       sessionId,
       expectedImageType,
+      detectedBarcode,
       timestamp: new Date().toISOString(),
     });
 
@@ -288,7 +292,7 @@ export class MultiImageOrchestrator {
       console.log('[MultiImageOrchestrator] 🔄 Routing to analyzer:', imageType);
       let analysisResult: ImageAnalysisResult;
       try {
-        analysisResult = await this.routeToAnalyzer(imageType, imageData, imageHash);
+        analysisResult = await this.routeToAnalyzer(imageType, imageData, imageHash, detectedBarcode);
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         console.error('[MultiImageOrchestrator] ❌ Image analysis failed:', error);
@@ -644,12 +648,14 @@ export class MultiImageOrchestrator {
    * @param imageType - Type of image
    * @param imageData - Image data
    * @param imageHash - Image hash
+   * @param detectedBarcode - Optional barcode from BarcodeDetector
    * @returns Promise resolving to ImageAnalysisResult
    */
   private async routeToAnalyzer(
     imageType: ImageType,
     imageData: ImageData,
-    imageHash: string
+    imageHash: string,
+    detectedBarcode?: string
   ): Promise<ImageAnalysisResult> {
     const timestamp = new Date();
     
@@ -657,30 +663,36 @@ export class MultiImageOrchestrator {
       // Requirement 4.3: Route to Barcode_Analyzer (Tier 1-4 pipeline)
       console.log('[MultiImageOrchestrator] 📊 Routing to Barcode Analyzer (Tier 1-4)');
       
-      // First, try to extract barcode from image using Gemini Vision
-      // This is a fallback for when the browser's BarcodeDetector API fails
-      let extractedBarcode: string | undefined;
-      try {
-        const { geminiClient } = await import('@/lib/services/gemini-client');
-        console.log('[MultiImageOrchestrator] 🔍 Attempting to extract barcode from image...');
-        
-        const extractedText = await geminiClient.extractText({
-          base64: imageData.base64,
-          mimeType: imageData.mimeType || 'image/jpeg',
-        });
-        
-        // Look for barcode patterns in the extracted text
-        const barcodeMatch = extractedText.match(/\b\d{8,14}\b/); // Match 8-14 digit numbers (common barcode formats)
-        
-        if (barcodeMatch) {
-          extractedBarcode = barcodeMatch[0];
-          console.log('[MultiImageOrchestrator] ✅ Extracted barcode from image:', extractedBarcode);
-        } else {
-          console.log('[MultiImageOrchestrator] ⚠️  No barcode pattern found in image');
+      // Use detected barcode if available, otherwise try to extract from image
+      let barcodeValue = detectedBarcode;
+      
+      if (!barcodeValue) {
+        // Fallback: Try to extract barcode from image using Gemini Vision
+        // This is a fallback for when the browser's BarcodeDetector API fails
+        console.log('[MultiImageOrchestrator] ⚠️  No barcode from detector, attempting extraction...');
+        try {
+          const { geminiClient } = await import('@/lib/services/gemini-client');
+          
+          const extractedText = await geminiClient.extractText({
+            base64: imageData.base64,
+            mimeType: imageData.mimeType || 'image/jpeg',
+          });
+          
+          // Look for barcode patterns in the extracted text
+          const barcodeMatch = extractedText.match(/\b\d{8,14}\b/); // Match 8-14 digit numbers (common barcode formats)
+          
+          if (barcodeMatch) {
+            barcodeValue = barcodeMatch[0];
+            console.log('[MultiImageOrchestrator] ✅ Extracted barcode from image:', barcodeValue);
+          } else {
+            console.log('[MultiImageOrchestrator] ⚠️  No barcode pattern found in image');
+          }
+        } catch (error) {
+          console.warn('[MultiImageOrchestrator] ⚠️  Barcode extraction failed:', error);
+          // Continue without barcode - will use image-based identification
         }
-      } catch (error) {
-        console.warn('[MultiImageOrchestrator] ⚠️  Barcode extraction failed:', error);
-        // Continue without barcode - will use image-based identification
+      } else {
+        console.log('[MultiImageOrchestrator] ✅ Using barcode from detector:', barcodeValue);
       }
       
       // Call the existing multi-tier scan orchestrator
@@ -688,7 +700,7 @@ export class MultiImageOrchestrator {
       const scanOrchestrator = createScanOrchestrator();
       
       const scanResult = await scanOrchestrator.scan({
-        barcode: extractedBarcode, // Pass extracted barcode if available
+        barcode: barcodeValue, // Use detected or extracted barcode
         image: {
           base64: imageData.base64,
           mimeType: imageData.mimeType || 'image/jpeg',
