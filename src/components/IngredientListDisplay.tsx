@@ -116,7 +116,7 @@ export default function IngredientListDisplay({
             const textColor = getIngredientTextColor(ingredient);
             
             return (
-              <div key={index} className="inline-flex items-center gap-1">
+              <div key={`ingredient-${index}-${ingredient.name}`} className="inline-flex items-center gap-1">
                 <span className={`text-sm ${textColor}`}>
                   {ingredient.name}
                 </span>
@@ -149,7 +149,7 @@ export default function IngredientListDisplay({
               <div className="mt-1 flex flex-wrap gap-2">
                 {ingredients.allergens.map((allergen, index) => (
                   <span
-                    key={index}
+                    key={`allergen-${index}-${allergen.name}`}
                     className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800 border border-red-300"
                   >
                     {allergen.allergenType?.replace('_', ' ')}
@@ -178,7 +178,7 @@ export default function IngredientListDisplay({
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ingredients.preservatives.map((preservative, index) => (
                         <span
-                          key={index}
+                          key={`preservative-${index}-${preservative.name}`}
                           className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-800 border border-orange-300"
                         >
                           {preservative.preservativeType?.replace('_', ' ')}
@@ -195,7 +195,7 @@ export default function IngredientListDisplay({
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ingredients.sweeteners.map((sweetener, index) => (
                         <span
-                          key={index}
+                          key={`sweetener-${index}-${sweetener.name}`}
                           className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-800 border border-orange-300"
                         >
                           {sweetener.sweetenerType?.replace('_', ' ')}
@@ -212,7 +212,7 @@ export default function IngredientListDisplay({
                     <div className="mt-1 flex flex-wrap gap-1">
                       {ingredients.artificialColors.map((color, index) => (
                         <span
-                          key={index}
+                          key={`color-${index}-${color.name}`}
                           className="inline-flex items-center px-2 py-0.5 rounded text-xs bg-orange-100 text-orange-800 border border-orange-300"
                         >
                           {color.colorType}
@@ -235,11 +235,11 @@ export default function IngredientListDisplay({
               View Detailed Breakdown
             </summary>
             <div className="mt-3 space-y-2">
-              {ingredients.ingredients.map((ingredient) => {
+              {ingredients.ingredients.map((ingredient, index) => {
                 const badge = getIngredientBadge(ingredient);
                 return (
                   <div
-                    key={ingredient.position}
+                    key={`detail-${index}-${ingredient.name}-${ingredient.position}`}
                     className="flex items-start gap-2 text-sm p-2 rounded bg-gray-50"
                   >
                     <span className="font-mono text-xs text-gray-500 mt-0.5">

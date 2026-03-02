@@ -702,9 +702,11 @@ The Product Hero multi-image capture workflow is now fully functional:
 2. ✅ **Single product per workflow** - No more duplicates
 3. ✅ **Ingredient parsing optional** - Nutrition scan succeeds even without ingredients
 4. ✅ **Results display correctly** - Complete product analysis shown after workflow
-5. ✅ **Session management working** - Fresh session for each guided workflow
-6. ✅ **Data merging working** - All three images merged into single product
-7. ✅ **Error handling robust** - Graceful fallbacks for all failure scenarios
+5. ✅ **Dimension analysis displayed** - Full premium analysis with all 5 dimensions
+6. ✅ **Session management working** - Fresh session for each guided workflow
+7. ✅ **Data merging working** - All three images merged into single product
+8. ✅ **Error handling robust** - User-friendly messages with actionable guidance
+9. ✅ **Rate limiting handled** - Clear 429 error messages with wait instructions
 
 **Known Limitations**:
 - Allergen detection quality depends on ingredient parsing success
@@ -712,3 +714,188 @@ The Product Hero multi-image capture workflow is now fully functional:
 - Health score calculation doesn't account for missing ingredient data (always starts at 100)
 
 **Ready for Production**: Yes, with the understanding that ingredient/allergen detection is best-effort and may not always be available.
+
+
+### 17. Display Dimension Analysis After Product Hero Workflow
+
+**Problem**: After completing the Product Hero workflow (all 3 images captured), only the nutrition analysis was displayed. The full dimension analysis (health, processing, allergens, environmental impact, responsibly produced) available in the premium tier was not shown.
+
+**Root Cause**: The guided mode results display only showed `NutritionInsightsDisplay` component. There was no code to trigger dimension analysis after workflow completion.
+
+**Solution**:
+- Added dimension analysis trigger when workflow completes (all 3 images captured)
+- After setting `guidedCaptureStep` to 4, check if workflow is complete and barcode exists
+- Call `/api/scan-multi-tier` endpoint with the product barcode to trigger dimension analysis
+- Update the `result` state with dimension analysis data when response is received
+- Added dimension analysis display section in guided mode results (step 4)
+- Shows all 5 dimensions with scores, explanations, and key factors
+- Displays user tier badge (Premium/Free) and cache status
+- Handles locked dimensions for free tier users with upgrade prompt
+
+**Code Changes**:
+```typescript
+// After workflow completes, trigger dimension analysis
+if (orchestratorResult.completionStatus.complete && orchestratorResult.product.barcode) {
+  const dimensionResponse = await fetch('/api/scan-multi-tier', {
+    method: 'POST',
+    body: JSON.stringify({
+      barcode: orchestratorResult.product.barcode,
+      userId,
+      sessionId: orchestratorResult.sessionId,
+      devUserTier,
+    }),
+  });
+  
+  if (dimensionResponse.ok) {
+    const dimensionResult = await dimensionResponse.json();
+    setResult(prev => prev ? {
+      ...prev,
+      dimensionAnalysis: dimensionResult.dimensionAnalysis,
+      dimensionStatus: dimensionResult.dimensionStatus,
+      // ... other dimension fields
+    } : prev);
+  }
+}
+
+// Display dimension analysis in results
+{result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
+  <div className="bg-white rounded-lg shadow-lg p-6">
+    {/* Dimension analysis UI with all 5 dimensions */}
+  </div>
+)}
+```
+
+**Benefits**:
+- ✅ Complete product analysis displayed after workflow completion
+- ✅ All 5 dimensions shown with scores and explanations
+- ✅ Premium tier users see full analysis
+- ✅ Free tier users see locked dimensions with upgrade prompt
+- ✅ Cache status displayed (fresh vs cached analysis)
+- ✅ Consistent with single-image scan experience
+- ✅ Better value proposition for premium tier
+
+**Files Changed**:
+- `src/app/page.tsx`
+
+**Testing**:
+- Complete Product Hero workflow with all 3 images
+- Verify nutrition analysis displays first
+- Verify dimension analysis displays below nutrition
+- Check all 5 dimensions are shown with correct scores
+- Verify premium tier shows all dimensions unlocked
+- Verify free tier shows some dimensions locked
+- Test with dev tier toggle to verify tier-based access
+
+
+### 18. Improve Error Handling with User-Friendly Messages
+
+**Problem**: When errors occurred (especially 429 rate limit errors), the frontend showed generic error messages that didn't help users understand what went wrong or what to do next. For example, a 429 error would prompt users to "try scanning again because the label might not be visible" which was misleading.
+
+**Root Cause**: The frontend was only displaying the raw error message from the backend without parsing HTTP status codes or providing context-specific guidance.
+
+**Solution**:
+- Created `error-handler.ts` utility to parse API errors and provide user-friendly messages
+- Maps HTTP status codes to specific user messages and actions:
+  - **429 Rate Limit**: "Too many requests. Please wait a moment and try again." (Wait 30-60 seconds)
+  - **400 Bad Request**: Context-specific messages for barcode, nutrition label, or ingredient errors
+  - **401 Unauthorized**: "Authentication required. Please sign in to continue."
+  - **403 Forbidden**: "Access denied. You may need to upgrade your account."
+  - **404 Not Found**: "Product not found. This might be a new product."
+  - **408 Timeout**: "Request timed out. Please try again."
+  - **413 Payload Too Large**: "Image file is too large. Please use a smaller image."
+  - **500 Server Error**: "Server error. Our team has been notified."
+  - **502/503/504 Service Unavailable**: "Service temporarily unavailable. Please try again shortly."
+- Enhanced `DetailedErrorDisplay` component to show:
+  - User-friendly message (not technical error)
+  - Actionable guidance (what to do next)
+  - Status code and error code for debugging
+  - Conditional "Try Again" button (only for retryable errors)
+  - Context-aware helper text
+- Updated error handling in `page.tsx` to use the new error parser
+
+**Code Changes**:
+```typescript
+// error-handler.ts - Parse API errors
+export async function parseApiError(response: Response): Promise<ApiError> {
+  const statusCode = response.status;
+  
+  switch (statusCode) {
+    case 429:
+      return {
+        statusCode,
+        errorCode: 'RATE_LIMIT_EXCEEDED',
+        userMessage: 'Too many requests. Please wait a moment and try again.',
+        retryable: true,
+        action: 'Wait 30-60 seconds before trying again',
+      };
+    // ... other status codes
+  }
+}
+
+// page.tsx - Use error parser
+if (!response.ok) {
+  const apiError = await parseApiError(response);
+  const errorDisplay = formatErrorForDisplay(apiError);
+  throw new Error(JSON.stringify({ ...errorDisplay }));
+}
+
+// DetailedErrorDisplay.tsx - Show user-friendly messages
+const userMessage = errorDetails.context?.userMessage || errorDetails.message;
+const action = errorDetails.context?.action;
+const retryable = errorDetails.context?.retryable ?? true;
+```
+
+**Benefits**:
+- ✅ Clear, user-friendly error messages
+- ✅ Actionable guidance for each error type
+- ✅ Proper handling of rate limits (429)
+- ✅ Context-specific messages for different failure scenarios
+- ✅ Conditional retry button (only shown for retryable errors)
+- ✅ Better user experience during errors
+- ✅ Easier debugging with status codes and error codes
+- ✅ Consistent error handling across the app
+
+**Files Changed**:
+- `src/lib/utils/error-handler.ts` (new)
+- `src/components/DetailedErrorDisplay.tsx`
+- `src/app/page.tsx`
+
+**Testing**:
+- Test with 429 rate limit error (verify wait message)
+- Test with 400 barcode error (verify barcode-specific message)
+- Test with 400 nutrition label error (verify label-specific message)
+- Test with 500 server error (verify generic server error message)
+- Verify "Try Again" button only shows for retryable errors
+- Verify action guidance is displayed when available
+- Test error report copying functionality
+
+
+### 19. Fix Missing React Keys in IngredientListDisplay
+
+**Problem**: React warning in console: "Each child in a list should have a unique 'key' prop" when rendering the IngredientListDisplay component.
+
+**Root Cause**: Several `.map()` calls in the component were using only `index` as the key, which can cause issues with React's reconciliation. Some keys were not unique enough (e.g., using only `ingredient.position` which might not be unique).
+
+**Solution**:
+- Updated all `.map()` calls to use composite keys that combine multiple unique identifiers
+- Main ingredient list: `key={ingredient-${index}-${ingredient.name}}`
+- Allergens list: `key={allergen-${index}-${allergen.name}}`
+- Preservatives list: `key={preservative-${index}-${preservative.name}}`
+- Sweeteners list: `key={sweetener-${index}-${sweetener.name}}`
+- Artificial colors list: `key={color-${index}-${color.name}}`
+- Details view: `key={detail-${index}-${ingredient.name}-${ingredient.position}}`
+
+**Benefits**:
+- ✅ No more React key warnings in console
+- ✅ Better React reconciliation performance
+- ✅ More stable component rendering
+- ✅ Prevents potential rendering bugs
+
+**Files Changed**:
+- `src/components/IngredientListDisplay.tsx`
+
+**Testing**:
+- Verify no React key warnings in console
+- Test ingredient list rendering with multiple ingredients
+- Test allergen, preservative, sweetener, and color lists
+- Verify details view expands correctly

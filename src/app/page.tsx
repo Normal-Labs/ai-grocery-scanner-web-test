@@ -25,6 +25,7 @@ import type { ImageType } from '@/lib/multi-image/DataMerger';
 // TODO: MultiImageOrchestrator should be called from API routes, not client
 // import { multiImageOrchestrator } from '@/lib/multi-image/MultiImageOrchestrator';
 import { useAuth } from '@/contexts/AuthContext';
+import { parseApiError, formatErrorForDisplay } from '@/lib/utils/error-handler';
 
 interface ProgressStep {
   stage?: string;
@@ -716,8 +717,14 @@ export default function ScanPage() {
       });
       
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to process image');
+        const apiError = await parseApiError(response);
+        const errorDisplay = formatErrorForDisplay(apiError);
+        
+        throw new Error(JSON.stringify({
+          ...errorDisplay,
+          statusCode: apiError.statusCode,
+          errorCode: apiError.errorCode,
+        }));
       }
       
       const orchestratorResult = await response.json();
@@ -855,27 +862,95 @@ export default function ScanPage() {
           // Set step to 4 to indicate completion and hide guided capture UI
           setGuidedCaptureStep(4);
           
-          // Fetch the complete product to ensure we have all merged data
-          // This is a safeguard to ensure nutrition data is displayed even if
-          // there was a timing issue with the product update
-          if (!orchestratorResult.product.nutrition_data && orchestratorResult.completionStatus.complete) {
-            console.log('[Scan Page] ⚠️  Nutrition data not in response, fetching complete product...');
-            // Note: In a real implementation, we would fetch from an API endpoint
-            // For now, we rely on the orchestrator returning the complete product
+          // Trigger dimension analysis for premium users
+          if (orchestratorResult.completionStatus.complete && orchestratorResult.product.barcode) {
+            console.log('[Scan Page] 🎯 Triggering dimension analysis...');
+            try {
+              const dimensionResponse = await fetch('/api/scan-multi-tier', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  barcode: orchestratorResult.product.barcode,
+                  userId,
+                  sessionId: orchestratorResult.sessionId,
+                  devUserTier,
+                }),
+              });
+              
+              if (dimensionResponse.ok) {
+                const dimensionResult = await dimensionResponse.json();
+                console.log('[Scan Page] ✅ Dimension analysis complete:', dimensionResult);
+                
+                // Update the scan result with dimension analysis
+                setResult(prev => prev ? {
+                  ...prev,
+                  dimensionAnalysis: dimensionResult.dimensionAnalysis,
+                  dimensionStatus: dimensionResult.dimensionStatus,
+                  dimensionCached: dimensionResult.dimensionCached,
+                  userTier: dimensionResult.userTier,
+                  availableDimensions: dimensionResult.availableDimensions,
+                  upgradePrompt: dimensionResult.upgradePrompt,
+                } : prev);
+              } else {
+                console.warn('[Scan Page] ⚠️  Dimension analysis failed:', await dimensionResponse.text());
+              }
+            } catch (err) {
+              console.error('[Scan Page] ❌ Dimension analysis error:', err);
+              // Don't fail the workflow if dimension analysis fails
+            }
           }
         }
       }
     } catch (err) {
       console.error('[Scan Page] ❌ Guided capture error:', err);
-      setError({
-        message: err instanceof Error ? err.message : 'Failed to process image',
-        timestamp: new Date(),
-        context: {
-          imageType,
-          step: guidedCaptureStep,
-          workflowMode: 'guided',
-        },
-      });
+      
+      // Parse structured error if available
+      let errorDetails: ErrorDetails;
+      
+      if (err instanceof Error) {
+        try {
+          const parsedError = JSON.parse(err.message);
+          errorDetails = {
+            message: parsedError.title || 'Failed to process image',
+            timestamp: new Date(),
+            context: {
+              imageType,
+              step: guidedCaptureStep,
+              workflowMode: 'guided',
+              statusCode: parsedError.statusCode,
+              errorCode: parsedError.errorCode,
+              userMessage: parsedError.message,
+              action: parsedError.action,
+              retryable: parsedError.retryable,
+            },
+          };
+        } catch {
+          // Not a structured error, use default format
+          errorDetails = {
+            message: err.message || 'Failed to process image',
+            timestamp: new Date(),
+            context: {
+              imageType,
+              step: guidedCaptureStep,
+              workflowMode: 'guided',
+            },
+          };
+        }
+      } else {
+        errorDetails = {
+          message: 'Failed to process image',
+          timestamp: new Date(),
+          context: {
+            imageType,
+            step: guidedCaptureStep,
+            workflowMode: 'guided',
+          },
+        };
+      }
+      
+      setError(errorDetails);
     } finally {
       setLoading(false);
     }
@@ -1022,6 +1097,122 @@ export default function ScanPage() {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {/* Dimension Analysis Results */}
+            {result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
+              <div className="bg-white rounded-lg shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-xl font-bold text-gray-900">
+                    🎯 Dimension Analysis
+                  </h3>
+                  <span className={`px-3 py-1 rounded-full text-sm ${
+                    result.dimensionCached 
+                      ? 'bg-green-100 text-green-800' 
+                      : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {result.dimensionCached ? '💾 Cached' : '🤖 Fresh'}
+                  </span>
+                </div>
+
+                {/* User Tier Badge */}
+                <div className="mb-4 flex items-center gap-2">
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    result.userTier === 'premium'
+                      ? 'bg-blue-100 text-blue-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {result.userTier === 'premium' ? '💎 Premium Tier' : '📋 Free Tier'}
+                  </span>
+                  {result.upgradePrompt && (
+                    <span className="text-sm text-gray-600">
+                      {result.upgradePrompt}
+                    </span>
+                  )}
+                </div>
+
+                {/* Dimensions Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {Object.entries(result.dimensionAnalysis.dimensions).map(([key, dimension]) => {
+                    const getScoreColor = (score: number) => {
+                      if (score >= 67) return 'text-green-600 bg-green-50';
+                      if (score >= 34) return 'text-yellow-600 bg-yellow-50';
+                      return 'text-red-600 bg-red-50';
+                    };
+
+                    const getDimensionLabel = (key: string) => {
+                      const labels: Record<string, string> = {
+                        health: '🏥 Health',
+                        processing: '🏭 Processing',
+                        allergens: '⚠️ Allergens',
+                        responsiblyProduced: '🌱 Responsible',
+                        environmentalImpact: '🌍 Environmental',
+                      };
+                      return labels[key] || key;
+                    };
+
+                    return (
+                      <div
+                        key={key}
+                        className={`p-4 rounded-lg border-2 ${
+                          dimension.locked
+                            ? 'bg-gray-50 border-gray-200 opacity-60'
+                            : 'bg-white border-gray-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-semibold text-gray-900">
+                            {getDimensionLabel(key)}
+                          </span>
+                          {dimension.locked ? (
+                            <span className="text-2xl">🔒</span>
+                          ) : (
+                            <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(dimension.score)}`}>
+                              {dimension.score}
+                            </span>
+                          )}
+                        </div>
+                        {dimension.available && !dimension.locked && (
+                          <div>
+                            <p className="text-sm text-gray-600 mb-2">
+                              {dimension.explanation}
+                            </p>
+                            {dimension.keyFactors && dimension.keyFactors.length > 0 && (
+                              <ul className="text-xs text-gray-500 space-y-1">
+                                {dimension.keyFactors.map((factor, idx) => (
+                                  <li key={idx} className="flex items-start">
+                                    <span className="mr-1">•</span>
+                                    <span>{factor}</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        )}
+                        {dimension.locked && (
+                          <p className="text-sm text-gray-500 italic">
+                            Upgrade to Premium to unlock
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Overall Confidence */}
+                {result.dimensionAnalysis.overallConfidence && (
+                  <div className="mt-4 pt-4 border-t border-gray-200">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700">
+                        Overall Confidence
+                      </span>
+                      <span className="text-sm text-gray-600">
+                        {(result.dimensionAnalysis.overallConfidence * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
             

@@ -38,6 +38,13 @@ export default function DetailedErrorDisplay({
     ? { message: error, timestamp: new Date() }
     : { ...error, timestamp: error.timestamp || new Date() };
 
+  // Extract user-friendly message and action from context
+  const userMessage = errorDetails.context?.userMessage as string || errorDetails.message;
+  const action = errorDetails.context?.action as string;
+  const retryable = errorDetails.context?.retryable as boolean ?? true;
+  const statusCode = errorDetails.context?.statusCode as number;
+  const errorCode = errorDetails.context?.errorCode as string || errorDetails.code;
+
   // Generate error report for copying
   const generateErrorReport = () => {
     const report = [
@@ -74,8 +81,15 @@ export default function DetailedErrorDisplay({
           <div className="flex-1">
             <h3 className="font-bold text-red-900 text-lg mb-1">{title}</h3>
             <p className="text-red-800 text-sm leading-relaxed">
-              {errorDetails.message}
+              {userMessage}
             </p>
+            {action && (
+              <div className="mt-2 bg-red-100 rounded-md p-2">
+                <p className="text-red-700 text-xs font-medium">
+                  💡 {action}
+                </p>
+              </div>
+            )}
           </div>
         </div>
         {onDismiss && (
@@ -100,10 +114,16 @@ export default function DetailedErrorDisplay({
               {errorDetails.timestamp?.toLocaleString()}
             </span>
           </div>
-          {errorDetails.code && (
+          {statusCode && (
+            <div>
+              <span className="text-red-600 font-semibold">Status:</span>{' '}
+              <span className="text-red-900">{statusCode}</span>
+            </div>
+          )}
+          {errorCode && (
             <div>
               <span className="text-red-600 font-semibold">Code:</span>{' '}
-              <span className="text-red-900">{errorDetails.code}</span>
+              <span className="text-red-900">{errorCode}</span>
             </div>
           )}
         </div>
@@ -131,7 +151,7 @@ export default function DetailedErrorDisplay({
 
       {/* Action Buttons */}
       <div className="flex flex-wrap gap-3">
-        {onRetry && (
+        {onRetry && retryable && (
           <button
             onClick={onRetry}
             className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors font-medium text-sm"
@@ -159,7 +179,10 @@ export default function DetailedErrorDisplay({
 
       {/* Helper Text */}
       <p className="text-xs text-red-600 mt-4 italic">
-        💡 Tip: Take a screenshot or copy this error report to share with support
+        {retryable 
+          ? '💡 Tip: Try again after following the suggested action above'
+          : '💡 Tip: Take a screenshot or copy this error report to share with support'
+        }
       </p>
     </div>
   );

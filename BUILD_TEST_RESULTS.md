@@ -46,6 +46,8 @@ npm run lint
 - Fresh sessions for each guided workflow
 - Barcode detection with fallback
 - Ingredient parsing optional (graceful degradation)
+- **Dimension analysis triggered after workflow completion**
+- **Full premium analysis displayed (all 5 dimensions)**
 
 ### ✅ Bug Fixes Applied
 1. Duplicate product creation - FIXED
@@ -53,7 +55,9 @@ npm run lint
 3. Nutrition label parsing failures - FIXED
 4. Results display after completion - FIXED
 5. Session reuse in guided mode - FIXED
-6. All 16 improvements documented in IMPROVEMENTS.md
+6. Dimension analysis not displayed - FIXED
+7. Error messages not user-friendly - FIXED
+8. All 18 improvements documented in IMPROVEMENTS.md
 
 ### ✅ Database Schema
 - MongoDB `multi_image_sessions` collection ready
