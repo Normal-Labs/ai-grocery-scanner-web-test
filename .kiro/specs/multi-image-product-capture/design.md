@@ -109,7 +109,8 @@ graph TB
 - DataMerger: Combines data from multiple images into single Product_Record
 
 **Service Layer**:
-- Reuses existing ImageClassifier for image type detection
+- Uses ImageClassifier for image type detection in progressive mode only
+- In guided mode, skips classification and trusts user-provided image type
 - Reuses existing Tier 1-4 pipeline for barcode analysis
 - Reuses existing DimensionAnalyzer for packaging analysis
 - Reuses existing NutritionOrchestrator for nutrition label analysis
@@ -140,29 +141,26 @@ sequenceDiagram
     UI->>UI: Show guided capture UI
     
     User->>UI: Capture barcode image
-    UI->>MultiImageOrch: Submit image (step 1/3)
+    UI->>MultiImageOrch: Submit image (step 1/3, type=barcode)
     MultiImageOrch->>SessionMgr: Create session
     SessionMgr->>DB: Store session
-    MultiImageOrch->>ImageClassifier: Classify image
-    ImageClassifier-->>MultiImageOrch: type=barcode
+    Note over MultiImageOrch: Skip classification in guided mode
     MultiImageOrch->>Analyzers: Analyze barcode
     Analyzers-->>MultiImageOrch: Product data
     MultiImageOrch->>SessionMgr: Update session (barcode captured)
     MultiImageOrch-->>UI: Advance to step 2/3
     
     User->>UI: Capture packaging image
-    UI->>MultiImageOrch: Submit image (step 2/3)
-    MultiImageOrch->>ImageClassifier: Classify image
-    ImageClassifier-->>MultiImageOrch: type=packaging
+    UI->>MultiImageOrch: Submit image (step 2/3, type=packaging)
+    Note over MultiImageOrch: Skip classification in guided mode
     MultiImageOrch->>Analyzers: Analyze packaging
     Analyzers-->>MultiImageOrch: Metadata
     MultiImageOrch->>SessionMgr: Update session (packaging captured)
     MultiImageOrch-->>UI: Advance to step 3/3
     
     User->>UI: Capture nutrition label
-    UI->>MultiImageOrch: Submit image (step 3/3)
-    MultiImageOrch->>ImageClassifier: Classify image
-    ImageClassifier-->>MultiImageOrch: type=nutrition_label
+    UI->>MultiImageOrch: Submit image (step 3/3, type=nutrition_label)
+    Note over MultiImageOrch: Skip classification in guided mode
     MultiImageOrch->>Analyzers: Analyze nutrition
     Analyzers-->>MultiImageOrch: Nutrition data
     MultiImageOrch->>DataMerger: Merge all data
@@ -188,7 +186,8 @@ sequenceDiagram
     User->>UI: Capture first image
     UI->>PHContext: Check Product Hero status
     PHContext-->>UI: Product Hero = false
-    UI->>MultiImageOrch: Submit image
+    UI->>MultiImageOrch: Submit image (no type specified)
+    Note over MultiImageOrch: Use ImageClassifier in progressive mode
     MultiImageOrch->>SessionMgr: Create session
     MultiImageOrch->>ProductMatcher: Check for existing product
     ProductMatcher->>DB: Query by barcode/visual
@@ -199,7 +198,8 @@ sequenceDiagram
     UI->>UI: Display "Complete this product" with missing types
     
     User->>UI: Capture second image (within 30 min)
-    UI->>MultiImageOrch: Submit image
+    UI->>MultiImageOrch: Submit image (no type specified)
+    Note over MultiImageOrch: Use ImageClassifier in progressive mode
     MultiImageOrch->>SessionMgr: Check active session
     SessionMgr-->>MultiImageOrch: Session active
     MultiImageOrch->>ProductMatcher: Match to existing product
@@ -438,7 +438,15 @@ interface CompletionStatus {
 ```
 
 **Workflow Logic**:
-- Delegates to ImageClassifier for image type detection
+- **Guided Mode**: Accepts `expectedImageType` parameter and skips image classification
+  - Trusts user intent based on workflow step (barcode → packaging → nutrition)
+  - Faster processing (no classification API call)
+  - More accurate (no misclassification of barcode as packaging)
+  - If analyzer fails (e.g., barcode unreadable), continues with empty data
+- **Progressive Mode**: Uses ImageClassifier for automatic image type detection
+  - Delegates to ImageClassifier when no `expectedImageType` provided
+  - Classifies image type with retry and fallback logic
+  - Handles low confidence and unknown types with user-friendly errors
 - Routes to appropriate analyzer based on image type
 - Uses SessionManager to track progress
 - Uses ProductMatcher to link images to products
@@ -943,7 +951,9 @@ After analyzing all acceptance criteria, I identified several opportunities to c
 
 #### 2. Image Classification Errors
 
-**Classification Confidence Too Low**:
+**Note**: Image classification is only used in **progressive mode**. In **guided mode**, the system trusts the user-provided image type and skips classification entirely.
+
+**Classification Confidence Too Low** (Progressive Mode Only):
 - **Cause**: Image is unclear, blurry, or ambiguous
 - **Handling**:
   - Return `type: 'unknown'` from ImageClassifier
@@ -952,13 +962,19 @@ After analyzing all acceptance criteria, I identified several opportunities to c
   - Allow retry with same or new image
 - **User Impact**: Requires recapture or manual selection
 
-**Classification Service Unavailable**:
+**Classification Service Unavailable** (Progressive Mode Only):
 - **Cause**: Gemini API rate limit or service outage
 - **Handling**:
   - Retry with exponential backoff (3 attempts)
   - If all retries fail, fall back to manual image type selection
   - Cache the manual selection for future reference
 - **User Impact**: Slight delay or manual intervention required
+
+**Misclassification Prevention** (Guided Mode):
+- **Benefit**: By skipping classification in guided mode, we prevent misclassification issues
+  - Example: Barcode images won't be incorrectly classified as packaging
+  - Faster processing (saves 2-3 seconds per image)
+  - More reliable workflow based on user intent
 
 #### 3. Product Matching Errors
 

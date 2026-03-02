@@ -57,6 +57,7 @@ export async function POST(request: NextRequest) {
       userId: body.userId,
       workflowMode: body.workflowMode,
       sessionId: body.sessionId,
+      imageType: body.imageType,
       hasImage: !!body.imageData,
     });
     
@@ -68,7 +69,8 @@ export async function POST(request: NextRequest) {
       },
       body.userId,
       body.workflowMode,
-      body.sessionId
+      body.sessionId,
+      body.imageType // Pass expected image type for guided mode
     );
     
     console.log('[API] ✅ Multi-image scan complete:', {

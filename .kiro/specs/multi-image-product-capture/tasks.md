@@ -426,3 +426,19 @@ The core Product Hero functionality is complete and working. Remaining optional 
 - Unit tests for individual components
 - Integration tests for end-to-end workflows
 - Additional error handling edge cases
+
+
+- [x] **12.11 Skip image classification in guided mode**
+  - Updated MultiImageOrchestrator to accept optional `expectedImageType` parameter
+  - In guided mode, trust the user's intent and skip image classification
+  - Improves accuracy (no misclassification of barcode as packaging)
+  - Faster processing (skips classification API call)
+  - Better UX (if barcode can't be read, show warning and continue)
+  - Progressive mode still uses ImageClassifier for automatic detection
+
+
+- [x] **12.12 Clean up label prefixes from extracted data**
+  - Added cleanup logic to remove "Brand:", "Product Name:", "Size:" etc. prefixes
+  - Improved regex patterns to better match label formats
+  - Applied cleanup to productName, brandName, and size fields
+  - Ensures cleaner data in database (e.g., "Nature's Bakery" instead of "Brand: Nature's Bakery")

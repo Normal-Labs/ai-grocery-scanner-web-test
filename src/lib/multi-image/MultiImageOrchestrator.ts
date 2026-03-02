@@ -92,7 +92,8 @@ export class MultiImageOrchestrator {
     imageData: ImageData,
     userId: string,
     workflowMode: 'guided' | 'progressive',
-    sessionId?: string
+    sessionId?: string,
+    expectedImageType?: ImageType
   ): Promise<ProcessImageResult> {
     const startTime = Date.now();
     
@@ -100,6 +101,7 @@ export class MultiImageOrchestrator {
       userId,
       workflowMode,
       sessionId,
+      expectedImageType,
       timestamp: new Date().toISOString(),
     });
 
@@ -150,67 +152,77 @@ export class MultiImageOrchestrator {
         };
       }
 
-      // Step 3: Classify image type with retry and fallback
-      // Requirement 4.1, 12.2: Delegate to ImageClassifier with error handling
-      console.log('[MultiImageOrchestrator] 🔍 Classifying image type...');
-      let classification: { type: string; confidence: number } | undefined;
-      let classificationAttempts = 0;
-      const MAX_CLASSIFICATION_RETRIES = 3;
-      
-      while (classificationAttempts < MAX_CLASSIFICATION_RETRIES) {
-        try {
-          classification = await this.imageClassifier.classify(imageData.base64);
-          break; // Success, exit retry loop
-        } catch (error) {
-          classificationAttempts++;
-          console.error(`[MultiImageOrchestrator] ❌ Image classification failed (attempt ${classificationAttempts}/${MAX_CLASSIFICATION_RETRIES}):`, error);
-          
-          if (classificationAttempts >= MAX_CLASSIFICATION_RETRIES) {
-            // All retries exhausted
-            monitoringService.logImageClassificationFailure(
-              error instanceof Error ? error.message : String(error),
-              imageHash
-            );
-            throw new Error(
-              'Unable to classify image after multiple attempts. The image may be unclear or the classification service is unavailable. Please ensure the image is clear and try again, or manually select the image type.'
-            );
-          }
-          
-          // Exponential backoff: 1s, 2s, 4s
-          await new Promise(resolve => setTimeout(resolve, Math.pow(2, classificationAttempts - 1) * 1000));
-        }
-      }
-      
-      if (!classification) {
-        throw new Error('Image classification failed unexpectedly.');
-      }
-      
-      // Map classification type to ImageType
+      // Step 3: Determine image type
+      // In guided mode with expectedImageType, skip classification and trust user intent
+      // In progressive mode, use ImageClassifier to determine type
       let imageType: ImageType;
-      if (classification.type === 'barcode') {
-        imageType = 'barcode';
-      } else if (classification.type === 'nutrition_label') {
-        imageType = 'nutrition_label';
-      } else if (classification.type === 'product_image') {
-        imageType = 'packaging';
-      } else if (classification.type === 'unknown' || classification.confidence < 0.6) {
-        // Requirement 12.2: Handle low classification confidence
-        monitoringService.logImageClassificationFailure(
-          `Low confidence: ${classification.confidence}`,
-          imageHash
-        );
-        throw new Error(
-          'Unable to determine image type with sufficient confidence. Please ensure the image is clear and try again, or manually select the image type.'
-        );
-      } else {
-        monitoringService.logImageClassificationFailure(
-          `Unknown type: ${classification.type}`,
-          imageHash
-        );
-        throw new Error('Unable to determine image type. Please ensure the image is clear and try again.');
-      }
       
-      console.log('[MultiImageOrchestrator] ✅ Image classified as:', imageType, `(confidence: ${classification.confidence})`);
+      if (expectedImageType) {
+        // Guided mode: trust the expected image type
+        imageType = expectedImageType;
+        console.log('[MultiImageOrchestrator] ✅ Using expected image type (guided mode):', imageType);
+      } else {
+        // Progressive mode: classify image type with retry and fallback
+        // Requirement 4.1, 12.2: Delegate to ImageClassifier with error handling
+        console.log('[MultiImageOrchestrator] 🔍 Classifying image type...');
+        let classification: { type: string; confidence: number } | undefined;
+        let classificationAttempts = 0;
+        const MAX_CLASSIFICATION_RETRIES = 3;
+        
+        while (classificationAttempts < MAX_CLASSIFICATION_RETRIES) {
+          try {
+            classification = await this.imageClassifier.classify(imageData.base64);
+            break; // Success, exit retry loop
+          } catch (error) {
+            classificationAttempts++;
+            console.error(`[MultiImageOrchestrator] ❌ Image classification failed (attempt ${classificationAttempts}/${MAX_CLASSIFICATION_RETRIES}):`, error);
+            
+            if (classificationAttempts >= MAX_CLASSIFICATION_RETRIES) {
+              // All retries exhausted
+              monitoringService.logImageClassificationFailure(
+                error instanceof Error ? error.message : String(error),
+                imageHash
+              );
+              throw new Error(
+                'Unable to classify image after multiple attempts. The image may be unclear or the classification service is unavailable. Please ensure the image is clear and try again, or manually select the image type.'
+              );
+            }
+            
+            // Exponential backoff: 1s, 2s, 4s
+            await new Promise(resolve => setTimeout(resolve, Math.pow(2, classificationAttempts - 1) * 1000));
+          }
+        }
+        
+        if (!classification) {
+          throw new Error('Image classification failed unexpectedly.');
+        }
+        
+        // Map classification type to ImageType
+        if (classification.type === 'barcode') {
+          imageType = 'barcode';
+        } else if (classification.type === 'nutrition_label') {
+          imageType = 'nutrition_label';
+        } else if (classification.type === 'product_image') {
+          imageType = 'packaging';
+        } else if (classification.type === 'unknown' || classification.confidence < 0.6) {
+          // Requirement 12.2: Handle low classification confidence
+          monitoringService.logImageClassificationFailure(
+            `Low confidence: ${classification.confidence}`,
+            imageHash
+          );
+          throw new Error(
+            'Unable to determine image type with sufficient confidence. Please ensure the image is clear and try again, or manually select the image type.'
+          );
+        } else {
+          monitoringService.logImageClassificationFailure(
+            `Unknown type: ${classification.type}`,
+            imageHash
+          );
+          throw new Error('Unable to determine image type. Please ensure the image is clear and try again.');
+        }
+        
+        console.log('[MultiImageOrchestrator] ✅ Image classified as:', imageType, `(confidence: ${classification.confidence})`);
+      }
 
       // Step 4: Get or create session with expiration recovery and multiple session handling
       // Requirements 3.3, 3.4, 3.5: Handle session expiration and multiple active sessions

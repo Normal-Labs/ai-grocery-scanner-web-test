@@ -123,17 +123,28 @@ export class VisualExtractorService {
 
     // If we have markdown-style bullets, extract the product name from them
     const productNameMatch = cleanedText.match(/\*\*Product Name:?\*\*\s*(.+?)(?:\n|$)/i) ||
-                            cleanedText.match(/Product Name:?\s*(.+?)(?:\n|$)/i);
+                            cleanedText.match(/Product Name:?\s*(.+?)(?:\n|$)/i) ||
+                            cleanedText.match(/Product:?\s*(.+?)(?:\n|$)/i);
     
     if (productNameMatch) {
       metadata.productName = productNameMatch[1].trim();
     } else if (potentialNames.length > 0) {
       metadata.productName = potentialNames[0];
     }
+    
+    // Clean up product name - remove common label prefixes
+    if (metadata.productName) {
+      metadata.productName = metadata.productName
+        .replace(/^Product Name:\s*/i, '')
+        .replace(/^Product:\s*/i, '')
+        .replace(/^Name:\s*/i, '')
+        .trim();
+    }
 
     // Try to identify brand (often appears near the top or as a single prominent word)
     const brandMatch = cleanedText.match(/\*\*Brand:?\*\*\s*(.+?)(?:\n|$)/i) ||
-                      cleanedText.match(/Brand Name:?\s*(.+?)(?:\n|$)/i);
+                      cleanedText.match(/Brand Name:?\s*(.+?)(?:\n|$)/i) ||
+                      cleanedText.match(/Brand:?\s*(.+?)(?:\n|$)/i);
     
     if (brandMatch) {
       metadata.brandName = brandMatch[1].trim();
@@ -142,18 +153,29 @@ export class VisualExtractorService {
         const wordCount = line.split(/\s+/).length;
         const isCapitalized = /^[A-Z]/.test(line);
         const isMarkdown = /^[\*\-\+]\s+/.test(line);
-        return wordCount <= 3 && isCapitalized && !isMarkdown;
+        const hasLabel = /^(Brand|Brand Name|Manufacturer):/i.test(line);
+        return wordCount <= 3 && isCapitalized && !isMarkdown && !hasLabel;
       });
 
       if (potentialBrands.length > 0 && potentialBrands[0] !== metadata.productName) {
         metadata.brandName = potentialBrands[0];
       }
     }
+    
+    // Clean up brand name - remove common label prefixes
+    if (metadata.brandName) {
+      metadata.brandName = metadata.brandName
+        .replace(/^Brand:\s*/i, '')
+        .replace(/^Brand Name:\s*/i, '')
+        .replace(/^Manufacturer:\s*/i, '')
+        .trim();
+    }
 
     // Try to identify size/quantity
     const sizeMatch = cleanedText.match(/\*\*Size:?\*\*\s*(.+?)(?:\n|$)/i) ||
                      cleanedText.match(/Size:?\s*(.+?)(?:\n|$)/i) ||
-                     cleanedText.match(/Quantity:?\s*(.+?)(?:\n|$)/i);
+                     cleanedText.match(/Quantity:?\s*(.+?)(?:\n|$)/i) ||
+                     cleanedText.match(/Net WT:?\s*(.+?)(?:\n|$)/i);
     
     if (sizeMatch) {
       metadata.size = sizeMatch[1].trim();
@@ -173,6 +195,16 @@ export class VisualExtractorService {
           break;
         }
       }
+    }
+    
+    // Clean up size - remove common label prefixes
+    if (metadata.size) {
+      metadata.size = metadata.size
+        .replace(/^Size:\s*/i, '')
+        .replace(/^Quantity:\s*/i, '')
+        .replace(/^Net WT:\s*/i, '')
+        .replace(/^Weight:\s*/i, '')
+        .trim();
     }
 
     // Try to identify category based on keywords
