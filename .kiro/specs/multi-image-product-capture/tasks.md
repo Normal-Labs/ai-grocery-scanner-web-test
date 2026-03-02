@@ -476,3 +476,12 @@ The core Product Hero functionality is complete and working. Remaining optional 
   - Updated rendering logic to hide GuidedCaptureUI when step > 3
   - Now shows nutrition analysis and product results after completion
   - User sees complete product profile with all captured data
+
+- [x] **12.17 Fix session retrieval causing duplicate products**
+  - Problem: Multiple products created for single workflow (3 products instead of 1)
+  - Root cause: `getActiveSession(userId)` retrieved ANY active session, not the specific one
+  - Session productId wasn't being preserved across image captures
+  - Solution: Added `getSessionById(sessionId)` method to SessionManager
+  - Updated orchestrator to use specific session lookup by sessionId
+  - Ensures session productId is maintained throughout workflow
+  - Prevents duplicate product creation

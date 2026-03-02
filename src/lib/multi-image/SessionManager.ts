@@ -180,6 +180,38 @@ export class SessionManager {
       return null;
     }
   }
+  /**
+   * Get a specific session by sessionId
+   *
+   * @param sessionId - Session ID to retrieve
+   * @returns Promise resolving to session or null if not found/expired
+   */
+  async getSessionById(sessionId: string): Promise<CaptureSession | null> {
+    try {
+      const collection = await this.getCollection();
+
+      const session = await collection.findOne({
+        sessionId,
+        status: 'active',
+      });
+
+      if (!session) {
+        console.log('[SessionManager] ℹ️  Session not found or expired:', sessionId);
+        return null;
+      }
+
+      // Return without _id
+      const { _id, ...sessionWithoutId } = session;
+      return sessionWithoutId as CaptureSession;
+    } catch (error) {
+      console.error('[SessionManager] ❌ Failed to get session by ID:', {
+        sessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
+  }
+
 
   /**
    * Update session with new image

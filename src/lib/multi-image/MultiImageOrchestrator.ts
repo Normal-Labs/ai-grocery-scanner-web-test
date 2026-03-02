@@ -233,9 +233,9 @@ export class MultiImageOrchestrator {
       
       try {
         if (sessionId) {
-          const existingSession = await this.sessionManager.getActiveSession(userId);
+          const existingSession = await this.sessionManager.getSessionById(sessionId);
           
-          if (existingSession && existingSession.sessionId === sessionId) {
+          if (existingSession) {
             // Session is still active
             session = existingSession;
             console.log('[MultiImageOrchestrator] ✅ Using existing session:', sessionId);

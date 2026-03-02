@@ -298,3 +298,49 @@ if (orchestratorResult.nextStep) {
 
 **Files Changed**:
 - `src/app/page.tsx`
+
+
+### 12. Fix Session Retrieval Causing Duplicate Products
+
+**Problem**: In production, a single Product Hero workflow created three separate database entries instead of one unified product. Each image (barcode, packaging, nutrition) created its own product record.
+
+**Root Cause**: The `MultiImageOrchestrator` was calling `getActiveSession(userId)` which retrieved ANY active session for the user, not the specific session by its ID. This meant:
+1. First image: Creates session with productId
+2. Second image: Retrieves a different/wrong session without productId
+3. ProductMatcher fails to find session context
+4. Creates new product instead of updating existing one
+
+**Solution**:
+- Added new `getSessionById(sessionId)` method to SessionManager
+- Updated MultiImageOrchestrator to use specific session lookup
+- Now correctly retrieves the exact session by its sessionId
+- Session productId is preserved across all three image captures
+
+**Code Changes**:
+```typescript
+// SessionManager.ts - New method
+async getSessionById(sessionId: string): Promise<CaptureSession | null> {
+  const session = await collection.findOne({
+    sessionId,
+    status: 'active',
+  });
+  return session;
+}
+
+// MultiImageOrchestrator.ts - Updated to use specific lookup
+if (sessionId) {
+  const existingSession = await this.sessionManager.getSessionById(sessionId);
+  // Now gets the EXACT session, not just any active session
+}
+```
+
+**Benefits**:
+- ✅ Single product created per workflow
+- ✅ Session productId maintained across all captures
+- ✅ ProductMatcher successfully uses session context
+- ✅ All three images linked to same product
+- ✅ No more duplicate products
+
+**Files Changed**:
+- `src/lib/multi-image/SessionManager.ts`
+- `src/lib/multi-image/MultiImageOrchestrator.ts`
