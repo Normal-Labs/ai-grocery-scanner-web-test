@@ -7,14 +7,22 @@ Quick reference to all documentation files in this project.
 - **[README.md](README.md)** - Project overview and quick start
 - **[SETUP.md](SETUP.md)** - Detailed setup instructions
 - **[CHANGELOG.md](CHANGELOG.md)** - Recent changes and updates
+- **[RELEASE_NOTES_v1.0.md](RELEASE_NOTES_v1.0.md)** - Version 1.0 release notes
 
 ## Deployment
 
 - **[VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)** - Complete Vercel deployment guide with troubleshooting
+- **[DEPLOYMENT_CHECKLIST.md](DEPLOYMENT_CHECKLIST.md)** - Pre-deployment verification checklist
 - **[NUTRITION_ANALYSIS_DEPLOYMENT.md](NUTRITION_ANALYSIS_DEPLOYMENT.md)** - Nutrition analysis feature deployment checklist
 - **[MONGODB_SETUP.md](MONGODB_SETUP.md)** - Step-by-step MongoDB Atlas configuration
 - **[MONGODB_TROUBLESHOOTING.md](MONGODB_TROUBLESHOOTING.md)** - Detailed MongoDB connection troubleshooting
 - **[REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md)** - Quick reference for critical environment variables
+
+## Features
+
+- **[PRODUCT_HERO.md](PRODUCT_HERO.md)** - Product Hero multi-image capture workflow
+- **[SCANNER_USAGE.md](SCANNER_USAGE.md)** - How to use the barcode scanner
+- **[DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)** - Development tier toggle for testing dimension analysis
 
 ## System Status
 
@@ -22,9 +30,7 @@ Quick reference to all documentation files in this project.
 
 ## User Guides
 
-- **[SCANNER_USAGE.md](SCANNER_USAGE.md)** - How to use the barcode scanner
 - **[MULTI_TIER_TESTING.md](MULTI_TIER_TESTING.md)** - Testing guide for all 4 tiers
-- **[DEV_TIER_TOGGLE.md](DEV_TIER_TOGGLE.md)** - Development tier toggle for testing dimension analysis
 - **[scripts/TESTING_GUIDE.md](scripts/TESTING_GUIDE.md)** - Nutrition analysis feature testing guide
 
 ## Technical Documentation
@@ -73,3 +79,11 @@ Quick reference to all documentation files in this project.
 - **Test nutrition analysis**: Follow [scripts/TESTING_GUIDE.md](scripts/TESTING_GUIDE.md)
 - **See implementation details**: Check spec files in `.kiro/specs/`
 - **Optimize costs**: Review [COST_OPTIMIZATION.md](COST_OPTIMIZATION.md)
+
+
+### Multi-Image Product Capture
+- **[.kiro/specs/multi-image-product-capture/](/.kiro/specs/multi-image-product-capture/)**
+  - `requirements.md` - Product Hero requirements
+  - `design.md` - Architecture and design
+  - `tasks.md` - Implementation task list
+  - `IMPROVEMENTS.md` - Bug fixes and improvements log
