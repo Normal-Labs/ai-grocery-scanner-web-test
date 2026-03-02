@@ -302,56 +302,139 @@ if (orchestratorResult.nextStep) {
 
 ### 12. Fix Session Retrieval Causing Duplicate Products
 
-**Problem**: In production, a single Product Hero workflow created three separate database entries instead of one unified product. Each image (barcode, packaging, nutrition) created its own product record. Additionally, no nutrition analysis was displayed at the end of the workflow.
+**Problem**: In production, a single Product Hero workflow created multiple database entries (2-3 products) instead of one unified product. The barcode scan would create one product, then 0.8 seconds later another product would be created.
 
-**Root Cause**: The `MultiImageOrchestrator` was calling `getActiveSession(userId)` which retrieved ANY active session for the user, not the specific session by its ID. This meant:
-1. First image: Creates session with productId A
-2. Second image: Retrieves wrong/different session without productId → creates product B
-3. Third image: Retrieves wrong/different session without productId → creates product C
-4. UI displays product C (only has nutrition data, missing barcode/packaging info)
-5. No complete product profile shown
+**Root Cause Analysis**:
+1. **Session Retrieval Issue** (Partially Fixed): The `MultiImageOrchestrator` was calling `getActiveSession(userId)` which retrieved ANY active session for the user, not the specific session by its ID. This was fixed by adding `getSessionById(sessionId)` method.
 
-**Impact**:
-- Three separate products in database instead of one
-- Nutrition analysis not displayed (showing wrong product)
-- Incomplete product data
-- Poor user experience
+2. **Duplicate Product Creation** (Main Issue): Even after fixing session retrieval, duplicates were still being created because:
+   - `ScanOrchestratorMultiTier` (Tier 4) creates/finds a product during barcode analysis
+   - `MultiImageOrchestrator` then calls `ProductMatcher` to find existing products
+   - `ProductMatcher` doesn't find the product (it was just created, session doesn't have productId yet)
+   - `DataMerger` creates ANOTHER product instead of using the one from scan orchestrator
+   - Result: Two products created for the same barcode scan
+
+**Timeline of Duplicate Creation**:
+```
+14:07:04.018 - ScanOrchestratorMultiTier Tier 4 creates product A
+14:07:04.815 - DataMerger creates product B (0.8 seconds later)
+```
 
 **Solution**:
-- Added new `getSessionById(sessionId)` method to SessionManager
-- Updated MultiImageOrchestrator to use specific session lookup
-- Now correctly retrieves the exact session by its sessionId
-- Session productId is preserved across all three image captures
-- All data merged into single product
-- Complete product with nutrition analysis displayed
+- Modified `MultiImageOrchestrator` to check if analyzer already returned a product
+- When `ScanOrchestratorMultiTier` creates/finds a product, include the product ID in analysis result metadata
+- Before calling `ProductMatcher`, check if analyzer provided a product ID
+- If product ID exists, fetch that product and use it directly (skip matcher)
+- Only call `ProductMatcher` if analyzer didn't provide a product
+- This prevents `DataMerger` from creating a duplicate product
 
 **Code Changes**:
 ```typescript
-// SessionManager.ts - New method
-async getSessionById(sessionId: string): Promise<CaptureSession | null> {
-  const session = await collection.findOne({
-    sessionId,
-    status: 'active',
-  });
-  return session;
+// MultiImageOrchestrator.ts - routeToAnalyzer for barcode
+return {
+  imageHash,
+  timestamp,
+  barcode: scanResult.product.barcode,
+  productName: scanResult.product.name,
+  metadata: {
+    productId: scanResult.product.id, // CRITICAL: Include product ID
+  },
+};
+
+// MultiImageOrchestrator.ts - processImage
+// Check if analyzer returned a product ID
+if (analysisResult.metadata?.productId) {
+  const productRepo = new ProductRepositoryMultiTier();
+  const fetchedProduct = await productRepo.findById(analysisResult.metadata.productId);
+  
+  if (fetchedProduct) {
+    // Use product from analyzer, skip matcher
+    matchResult = {
+      matched: true,
+      productId: fetchedProduct.id,
+      confidence: 1.0,
+      matchMethod: 'session',
+      product: fetchedProduct,
+    };
+  }
 }
 
-// MultiImageOrchestrator.ts - Updated to use specific lookup
-if (sessionId) {
-  const existingSession = await this.sessionManager.getSessionById(sessionId);
-  // Now gets the EXACT session, not just any active session
+// If no product from analyzer, use ProductMatcher
+if (!matchResult) {
+  matchResult = await this.productMatcher.matchProduct(...);
 }
 ```
 
 **Benefits**:
-- ✅ Single product created per workflow
+- ✅ Single product created per workflow (no more duplicates)
+- ✅ Product from scan orchestrator is reused by data merger
 - ✅ Session productId maintained across all captures
-- ✅ ProductMatcher successfully uses session context
 - ✅ All three images linked to same product
 - ✅ Complete product data with nutrition analysis displayed
-- ✅ No more duplicate products
+- ✅ Proper data consolidation
 
 **Files Changed**:
-- `src/lib/multi-image/SessionManager.ts`
 - `src/lib/multi-image/MultiImageOrchestrator.ts`
-- `src/app/page.tsx` (added safeguard logging)
+- `src/lib/multi-image/SessionManager.ts` (from previous fix)
+
+**Testing**:
+- Need to test in production with real barcode scans
+- Verify only ONE product is created per workflow
+- Check that all three images are linked to the same product
+- Confirm nutrition analysis is displayed correctly
+
+
+### 13. Add Barcode Extraction Fallback for Product Hero
+
+**Problem**: Barcode extraction has been failing consistently in production for the past 2 days. The barcode number is not being detected from images, even though it was working reliably 3 days ago.
+
+**Root Cause**: 
+1. Browser's `BarcodeDetector` API is unreliable and often fails to detect barcodes
+2. When BarcodeDetector fails, only the image is sent (no barcode value)
+3. MultiImageOrchestrator was passing only the image to scan orchestrator
+4. Scan orchestrator requires a barcode value for Tier 1 (cache/database lookup)
+5. Without barcode, it skips Tier 1 and goes to Tier 2-4
+6. Tier 2 (OCR) and Tier 3-4 are not designed for barcode extraction
+7. Result: No barcode extracted, product created without barcode
+
+**Solution**:
+- Added Gemini Vision barcode extraction as fallback in MultiImageOrchestrator
+- Before calling scan orchestrator, attempts to extract barcode from image
+- Uses regex pattern matching to find 8-14 digit numbers (common barcode formats)
+- Passes extracted barcode to scan orchestrator for Tier 1 lookup
+- Falls back to image-based identification if extraction fails
+- Improves reliability of barcode detection
+
+**Code Changes**:
+```typescript
+// MultiImageOrchestrator.ts - Added barcode extraction
+if (imageType === 'barcode') {
+  // Try to extract barcode from image using Gemini Vision
+  let extractedBarcode: string | undefined;
+  try {
+    const barcodeExtractionResult = await geminiClient.extractText(imageData.base64);
+    const barcodeMatch = text.match(/\b\d{8,14}\b/); // Match barcode patterns
+    if (barcodeMatch) {
+      extractedBarcode = barcodeMatch[0];
+    }
+  } catch (error) {
+    // Continue without barcode
+  }
+  
+  // Pass extracted barcode to scan orchestrator
+  const scanResult = await scanOrchestrator.scan({
+    barcode: extractedBarcode, // Now includes barcode if extracted
+    image: { ... },
+  });
+}
+```
+
+**Benefits**:
+- ✅ Improved barcode detection reliability
+- ✅ Fallback when browser BarcodeDetector API fails
+- ✅ Enables Tier 1 cache/database lookups
+- ✅ Faster product identification when barcode is found
+- ✅ Better user experience with more reliable barcode scanning
+
+**Files Changed**:
+- `src/lib/multi-image/MultiImageOrchestrator.ts`

@@ -326,60 +326,90 @@ export class MultiImageOrchestrator {
       // Requirement 3.3, 3.4: If session expired, attempt to match to existing product
       console.log('[MultiImageOrchestrator] 🔍 Matching to existing product...');
       
+      // CRITICAL FIX: If the analyzer already created/found a product (e.g., Tier 4 in ScanOrchestratorMultiTier),
+      // use that product directly instead of trying to match it again. This prevents duplicate product creation.
       let matchResult;
-      try {
-        matchResult = await this.productMatcher.matchProduct(
-          imageType,
-          {
-            barcode: analysisResult.barcode,
-            productName: analysisResult.productName,
-            brandName: analysisResult.brandName,
-            imageHash,
-          },
-          sessionExpired ? undefined : session // Don't use expired session for matching
-        );
-        
-        // Log matching confidence
-        monitoringService.logProductMatchingConfidence(
-          matchResult.confidence,
-          matchResult.matchMethod,
-          matchResult.productId
-        );
-        
-        // Requirement 12.3: Handle ambiguous match
-        if (matchResult.matched && matchResult.confidence < 0.95 && matchResult.confidence >= 0.85) {
-          console.warn('[MultiImageOrchestrator] ⚠️  Ambiguous match detected:', {
-            confidence: matchResult.confidence,
-            productId: matchResult.productId,
-          });
-          // Use highest confidence match (already selected by ProductMatcher)
-        }
-        
-        // Requirement 12.3: Handle barcode mismatch
-        if (matchResult.matched && imageType === 'barcode' && matchResult.product?.barcode) {
-          if (analysisResult.barcode && analysisResult.barcode !== matchResult.product.barcode) {
-            console.warn('[MultiImageOrchestrator] ⚠️  Barcode mismatch detected:', {
-              newBarcode: analysisResult.barcode,
-              existingBarcode: matchResult.product.barcode,
-            });
-            monitoringService.logDataConsistencyWarning(
-              'barcode',
-              matchResult.product.barcode,
-              analysisResult.barcode,
-              'Barcode mismatch - using most recent value'
-            );
-            // Flag product for review (will be handled by DataMerger)
+      let productFromAnalyzer: Product | undefined;
+      
+      // Check if analyzer returned a product ID in the analysis result
+      if (analysisResult.metadata?.productId) {
+        console.log('[MultiImageOrchestrator] ✅ Analyzer returned product ID, fetching product:', analysisResult.metadata.productId);
+        try {
+          const productRepo = new (await import('@/lib/supabase/repositories/ProductRepositoryMultiTier')).ProductRepositoryMultiTier();
+          const fetchedProduct = await productRepo.findById(analysisResult.metadata.productId);
+          
+          if (fetchedProduct) {
+            productFromAnalyzer = fetchedProduct;
+            console.log('[MultiImageOrchestrator] ✅ Using product from analyzer, skipping matcher');
+            matchResult = {
+              matched: true,
+              productId: productFromAnalyzer.id,
+              confidence: 1.0,
+              matchMethod: 'session' as const,
+              product: productFromAnalyzer,
+            };
           }
+        } catch (error) {
+          console.error('[MultiImageOrchestrator] ⚠️  Failed to fetch product from analyzer, falling back to matcher:', error);
         }
-      } catch (error) {
-        console.error('[MultiImageOrchestrator] ❌ Product matching failed:', error);
-        // Requirement 12.3: Handle no match found - create new product
-        console.log('[MultiImageOrchestrator] ℹ️  No match found, will create new product');
-        matchResult = {
-          matched: false,
-          confidence: 0.0,
-          matchMethod: 'visual_similarity' as const,
-        };
+      }
+      
+      // If no product from analyzer, use ProductMatcher
+      if (!matchResult) {
+        try {
+          matchResult = await this.productMatcher.matchProduct(
+            imageType,
+            {
+              barcode: analysisResult.barcode,
+              productName: analysisResult.productName,
+              brandName: analysisResult.brandName,
+              imageHash,
+            },
+            sessionExpired ? undefined : session // Don't use expired session for matching
+          );
+          
+          // Log matching confidence
+          monitoringService.logProductMatchingConfidence(
+            matchResult.confidence,
+            matchResult.matchMethod,
+            matchResult.productId
+          );
+          
+          // Requirement 12.3: Handle ambiguous match
+          if (matchResult.matched && matchResult.confidence < 0.95 && matchResult.confidence >= 0.85) {
+            console.warn('[MultiImageOrchestrator] ⚠️  Ambiguous match detected:', {
+              confidence: matchResult.confidence,
+              productId: matchResult.productId,
+            });
+            // Use highest confidence match (already selected by ProductMatcher)
+          }
+          
+          // Requirement 12.3: Handle barcode mismatch
+          if (matchResult.matched && imageType === 'barcode' && matchResult.product?.barcode) {
+            if (analysisResult.barcode && analysisResult.barcode !== matchResult.product.barcode) {
+              console.warn('[MultiImageOrchestrator] ⚠️  Barcode mismatch detected:', {
+                newBarcode: analysisResult.barcode,
+                existingBarcode: matchResult.product.barcode,
+              });
+              monitoringService.logDataConsistencyWarning(
+                'barcode',
+                matchResult.product.barcode,
+                analysisResult.barcode,
+                'Barcode mismatch - using most recent value'
+              );
+              // Flag product for review (will be handled by DataMerger)
+            }
+          }
+        } catch (error) {
+          console.error('[MultiImageOrchestrator] ❌ Product matching failed:', error);
+          // Requirement 12.3: Handle no match found - create new product
+          console.log('[MultiImageOrchestrator] ℹ️  No match found, will create new product');
+          matchResult = {
+            matched: false,
+            confidence: 0.0,
+            matchMethod: 'visual_similarity' as const,
+          };
+        }
       }
       
       // If session expired and we found a match, log recovery
@@ -627,11 +657,38 @@ export class MultiImageOrchestrator {
       // Requirement 4.3: Route to Barcode_Analyzer (Tier 1-4 pipeline)
       console.log('[MultiImageOrchestrator] 📊 Routing to Barcode Analyzer (Tier 1-4)');
       
+      // First, try to extract barcode from image using Gemini Vision
+      // This is a fallback for when the browser's BarcodeDetector API fails
+      let extractedBarcode: string | undefined;
+      try {
+        const { geminiClient } = await import('@/lib/services/gemini-client');
+        console.log('[MultiImageOrchestrator] 🔍 Attempting to extract barcode from image...');
+        
+        const extractedText = await geminiClient.extractText({
+          base64: imageData.base64,
+          mimeType: imageData.mimeType || 'image/jpeg',
+        });
+        
+        // Look for barcode patterns in the extracted text
+        const barcodeMatch = extractedText.match(/\b\d{8,14}\b/); // Match 8-14 digit numbers (common barcode formats)
+        
+        if (barcodeMatch) {
+          extractedBarcode = barcodeMatch[0];
+          console.log('[MultiImageOrchestrator] ✅ Extracted barcode from image:', extractedBarcode);
+        } else {
+          console.log('[MultiImageOrchestrator] ⚠️  No barcode pattern found in image');
+        }
+      } catch (error) {
+        console.warn('[MultiImageOrchestrator] ⚠️  Barcode extraction failed:', error);
+        // Continue without barcode - will use image-based identification
+      }
+      
       // Call the existing multi-tier scan orchestrator
       const { createScanOrchestrator } = await import('@/lib/orchestrator/ScanOrchestratorMultiTier');
       const scanOrchestrator = createScanOrchestrator();
       
       const scanResult = await scanOrchestrator.scan({
+        barcode: extractedBarcode, // Pass extracted barcode if available
         image: {
           base64: imageData.base64,
           mimeType: imageData.mimeType || 'image/jpeg',
@@ -651,6 +708,9 @@ export class MultiImageOrchestrator {
           size: scanResult.product.size || undefined,
           category: scanResult.product.category || undefined,
           imageUrl: scanResult.product.imageUrl || undefined,
+          metadata: {
+            productId: scanResult.product.id, // CRITICAL: Include product ID so MultiImageOrchestrator can use it
+          },
         };
       } else {
         throw new Error('Barcode scan failed: ' + (scanResult.error?.message || 'Unknown error'));

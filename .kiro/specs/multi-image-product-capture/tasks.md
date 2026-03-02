@@ -485,3 +485,15 @@ The core Product Hero functionality is complete and working. Remaining optional 
   - Updated orchestrator to use specific session lookup by sessionId
   - Ensures session productId is maintained throughout workflow
   - Prevents duplicate product creation
+
+- [x] **12.18 Add barcode extraction fallback for Product Hero**
+  - Problem: Barcode extraction failing consistently in production (past 2 days)
+  - Root cause: Browser BarcodeDetector API fails, but no fallback extraction
+  - MultiImageOrchestrator was passing only image to scan orchestrator, not barcode
+  - Scan orchestrator skipped Tier 1 (requires barcode), went to Tier 2-4
+  - Tier 2-4 don't reliably extract barcodes from images
+  - Solution: Added Gemini Vision barcode extraction before calling scan orchestrator
+  - Extracts barcode pattern (8-14 digits) from image using OCR
+  - Passes extracted barcode to scan orchestrator for Tier 1 lookup
+  - Falls back to image-based identification if extraction fails
+  - Improves barcode detection reliability
