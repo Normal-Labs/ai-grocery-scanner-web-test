@@ -127,7 +127,7 @@ export class ScanOrchestrator {
       // Generate image hash for cache lookup (even if barcode is provided)
       try {
         imageHash = await hashImage(request.imageData);
-        console.log('[ScanOrchestrator] ✅ Generated image hash:', imageHash.substring(0, 16) + '...');
+        console.log('[ScanOrchestrator] ✅ Generated image hash');
       } catch (error) {
         console.error('[ScanOrchestrator] ❌ Failed to generate image hash:', error);
         console.error('[ScanOrchestrator] Error details:', {

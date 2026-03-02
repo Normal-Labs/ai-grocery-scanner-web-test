@@ -176,7 +176,7 @@ export class NutritionOrchestrator {
       let imageHash: string;
       try {
         imageHash = request.imageHash || await hashImage(request.imageData);
-        console.log('[NutritionOrchestrator] ✅ Generated image hash:', imageHash.substring(0, 16) + '...');
+        console.log('[NutritionOrchestrator] ✅ Generated image hash');
       } catch (error) {
         // Requirement 8.1: Handle image hash generation errors
         console.error('[NutritionOrchestrator] ❌ Failed to generate image hash:', error);

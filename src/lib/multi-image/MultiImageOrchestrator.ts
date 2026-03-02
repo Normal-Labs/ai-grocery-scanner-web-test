@@ -107,7 +107,7 @@ export class MultiImageOrchestrator {
       // Step 1: Generate SHA-256 hash for deduplication
       // Requirement 9.1: Generate SHA-256 hash of image data
       const imageHash = await hashImage(imageData.base64);
-      console.log('[MultiImageOrchestrator] 🔑 Generated image hash:', imageHash.substring(0, 16) + '...');
+      console.log('[MultiImageOrchestrator] 🔑 Generated image hash');
 
       // Step 2: Check MongoDB cache for existing image hash
       // Requirement 9.5, 10.1: Check cache before processing
@@ -283,17 +283,18 @@ export class MultiImageOrchestrator {
         
         // Requirement 12.5: Handle analyzer failures with specific messages
         if (imageType === 'barcode') {
-          throw new Error(
-            'Failed to analyze barcode image. The barcode may be unreadable or damaged. Please try recapturing the barcode or enter it manually.'
-          );
+          // Barcode analyzer failure: continue with empty data
+          console.warn('[MultiImageOrchestrator] ⚠️  Barcode analyzer failed, continuing without barcode data');
+          analysisResult = {
+            imageHash,
+            timestamp: new Date(),
+          };
         } else if (imageType === 'packaging') {
           // Packaging analyzer failure: return partial results if possible
           console.warn('[MultiImageOrchestrator] ⚠️  Packaging analyzer failed, continuing with partial data');
           analysisResult = {
             imageHash,
             timestamp: new Date(),
-            productName: 'Unknown Product',
-            brandName: 'Unknown Brand',
           };
         } else {
           // Nutrition analyzer failure
@@ -484,21 +485,43 @@ export class MultiImageOrchestrator {
    * @returns Promise resolving to CompletionStatus
    */
   async getCompletionStatus(productId: string): Promise<CompletionStatus> {
-    // This would query the product from database to get captured_image_types
-    // For now, return a placeholder implementation
-    // TODO: Implement actual database query
-    
-    const allTypes: ImageType[] = ['barcode', 'packaging', 'nutrition_label'];
-    const capturedTypes: ImageType[] = []; // TODO: Get from product metadata
-    const missingTypes = allTypes.filter(type => !capturedTypes.includes(type));
-    const progress = (capturedTypes.length / allTypes.length) * 100;
-    
-    return {
-      complete: capturedTypes.length === 3,
-      capturedTypes,
-      missingTypes,
-      progress,
-    };
+    try {
+      // Query product from database to get captured_image_types
+      const productRepo = new (await import('@/lib/supabase/repositories/ProductRepositoryMultiTier')).ProductRepositoryMultiTier();
+      const product = await productRepo.findById(productId);
+      
+      if (!product) {
+        console.warn('[MultiImageOrchestrator] ⚠️  Product not found:', productId);
+        return {
+          complete: false,
+          capturedTypes: [],
+          missingTypes: ['barcode', 'packaging', 'nutrition_label'],
+          progress: 0,
+        };
+      }
+      
+      // Get captured types from metadata
+      const capturedTypes = (product.metadata?.captured_image_types as ImageType[]) || [];
+      const allTypes: ImageType[] = ['barcode', 'packaging', 'nutrition_label'];
+      const missingTypes = allTypes.filter(type => !capturedTypes.includes(type));
+      const progress = (capturedTypes.length / allTypes.length) * 100;
+      
+      return {
+        complete: capturedTypes.length === 3,
+        capturedTypes,
+        missingTypes,
+        progress,
+      };
+    } catch (error) {
+      console.error('[MultiImageOrchestrator] ❌ Failed to get completion status:', error);
+      // Return safe default
+      return {
+        complete: false,
+        capturedTypes: [],
+        missingTypes: ['barcode', 'packaging', 'nutrition_label'],
+        progress: 0,
+      };
+    }
   }
 
   /**
@@ -583,67 +606,130 @@ export class MultiImageOrchestrator {
   ): Promise<ImageAnalysisResult> {
     const timestamp = new Date();
     
-    // TODO: Implement actual analyzer routing
-    // For now, return placeholder data
-    
     if (imageType === 'barcode') {
       // Requirement 4.3: Route to Barcode_Analyzer (Tier 1-4 pipeline)
       console.log('[MultiImageOrchestrator] 📊 Routing to Barcode Analyzer (Tier 1-4)');
       
-      // TODO: Call actual Tier 1-4 pipeline
-      return {
-        imageHash,
-        timestamp,
-        barcode: '123456789012', // Placeholder
-        productName: 'Sample Product',
-        brandName: 'Sample Brand',
-      };
-    } else if (imageType === 'packaging') {
-      // Requirement 4.4: Route to Packaging_Analyzer (DimensionAnalyzer)
-      console.log('[MultiImageOrchestrator] 📦 Routing to Packaging Analyzer (DimensionAnalyzer)');
+      // Call the existing multi-tier scan orchestrator
+      const { createScanOrchestrator } = await import('@/lib/orchestrator/ScanOrchestratorMultiTier');
+      const scanOrchestrator = createScanOrchestrator();
       
-      // TODO: Call actual DimensionAnalyzer
-      return {
-        imageHash,
-        timestamp,
-        productName: 'Sample Product',
-        brandName: 'Sample Brand',
-        size: '12 oz',
-        category: 'Food',
-        dimensions: {
-          width: 10,
-          height: 15,
-          depth: 5,
-          unit: 'cm',
+      const scanResult = await scanOrchestrator.scan({
+        image: {
+          base64: imageData.base64,
+          mimeType: imageData.mimeType || 'image/jpeg',
         },
-      };
+        imageHash,
+        userId: 'multi-image-user',
+        sessionId: 'multi-image-session-' + Date.now(),
+      });
+      
+      if (scanResult.success && scanResult.product) {
+        return {
+          imageHash,
+          timestamp,
+          barcode: scanResult.product.barcode || undefined,
+          productName: scanResult.product.name,
+          brandName: scanResult.product.brand || undefined,
+          size: scanResult.product.size || undefined,
+          category: scanResult.product.category || undefined,
+          imageUrl: scanResult.product.imageUrl || undefined,
+        };
+      } else {
+        throw new Error('Barcode scan failed: ' + (scanResult.error?.message || 'Unknown error'));
+      }
+    } else if (imageType === 'packaging') {
+      // Requirement 4.4: Route to Packaging_Analyzer (Visual text extraction)
+      console.log('[MultiImageOrchestrator] 📦 Routing to Packaging Analyzer (Visual Extractor)');
+      
+      // Use VisualExtractorService to extract product info from packaging
+      const { visualExtractorService } = await import('@/lib/services/visual-extractor');
+      
+      try {
+        const extractResult = await visualExtractorService.extractText({
+          image: {
+            base64: imageData.base64,
+            mimeType: imageData.mimeType || 'image/jpeg',
+          },
+          imageHash,
+        });
+        
+        if (extractResult.success && extractResult.metadata) {
+          const result = {
+            imageHash,
+            timestamp,
+            productName: extractResult.metadata.productName,
+            brandName: extractResult.metadata.brandName,
+            size: extractResult.metadata.size,
+            category: extractResult.metadata.category,
+          };
+          console.log('[MultiImageOrchestrator] 📦 Packaging data extracted:', {
+            productName: result.productName,
+            brandName: result.brandName,
+            size: result.size,
+            category: result.category,
+          });
+          return result;
+        } else {
+          throw new Error('Packaging analysis failed: ' + (extractResult.error?.message || 'Unknown error'));
+        }
+      } catch (error) {
+        console.error('[MultiImageOrchestrator] ❌ Packaging analyzer failed:', error);
+        throw error;
+      }
     } else {
       // Requirement 4.5: Route to Nutrition_Analyzer (NutritionOrchestrator)
       console.log('[MultiImageOrchestrator] 🥗 Routing to Nutrition Analyzer (NutritionOrchestrator)');
       
-      // TODO: Call actual NutritionOrchestrator
-      return {
-        imageHash,
-        timestamp,
-        nutritionData: {
-          servingSize: { amount: 100, unit: 'g' },
-          calories: 200,
-          macros: {
-            fat: 10,
-            saturatedFat: 2,
-            transFat: 0,
-            carbs: 25,
-            fiber: 3,
-            sugars: 5,
-            protein: 8,
+      // Call the existing NutritionOrchestrator
+      const { NutritionOrchestrator } = await import('@/lib/orchestrator/NutritionOrchestrator');
+      const { NutritionParser } = await import('@/lib/services/nutrition-parser');
+      const { IngredientParser } = await import('@/lib/services/ingredient-parser');
+      const { HealthScorer } = await import('@/lib/services/health-scorer');
+      
+      const nutritionOrchestrator = new NutritionOrchestrator(
+        new NutritionParser(),
+        new IngredientParser(),
+        new HealthScorer()
+      );
+      
+      try {
+        const nutritionResult = await nutritionOrchestrator.processScan({
+          imageData: imageData.base64,
+          imageHash,
+          userId: 'multi-image-user',
+          tier: 'premium',
+        });
+        
+        // Convert NutritionScanResult to ImageAnalysisResult
+        return {
+          imageHash,
+          timestamp,
+          productName: nutritionResult.productName || undefined,
+          nutritionData: {
+            servingSize: nutritionResult.nutritionalFacts.servingSize,
+            calories: nutritionResult.nutritionalFacts.calories.value,
+            macros: {
+              fat: nutritionResult.nutritionalFacts.totalFat.value,
+              saturatedFat: nutritionResult.nutritionalFacts.saturatedFat?.value || 0,
+              transFat: nutritionResult.nutritionalFacts.transFat?.value || 0,
+              carbs: nutritionResult.nutritionalFacts.totalCarbohydrates.value,
+              fiber: nutritionResult.nutritionalFacts.dietaryFiber?.value || 0,
+              sugars: nutritionResult.nutritionalFacts.totalSugars?.value || 0,
+              protein: nutritionResult.nutritionalFacts.protein.value,
+            },
+            sodium: nutritionResult.nutritionalFacts.sodium?.value || 0,
+            lastUpdated: nutritionResult.timestamp.toISOString(),
           },
-          sodium: 300,
-          lastUpdated: new Date().toISOString(),
-        },
-        healthScore: 75,
-        hasAllergens: false,
-        allergenTypes: [],
-      };
+          healthScore: nutritionResult.healthScore.overall,
+          hasAllergens: nutritionResult.ingredients.ingredients.some(i => i.isAllergen),
+          allergenTypes: nutritionResult.ingredients.ingredients.filter(i => i.isAllergen).map(i => i.name),
+          ingredients: nutritionResult.ingredients.ingredients.map(i => i.name),
+        };
+      } catch (error) {
+        console.error('[MultiImageOrchestrator] ❌ Nutrition analyzer failed:', error);
+        throw error;
+      }
     }
   }
 

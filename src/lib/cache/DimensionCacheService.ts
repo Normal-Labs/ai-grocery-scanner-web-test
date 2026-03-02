@@ -76,7 +76,7 @@ export class DimensionCacheService {
 
       if (!entry) {
         const duration = Date.now() - startTime;
-        console.log(`[Dimension Cache] ❌ Cache MISS: productId=${productId.substring(0, 16)}... (${duration}ms)`);
+        console.log(`[Dimension Cache] ❌ Cache MISS (${duration}ms)`);
         return { found: false, expired: false };
       }
 
@@ -86,12 +86,12 @@ export class DimensionCacheService {
 
       if (expired) {
         const duration = Date.now() - startTime;
-        console.log(`[Dimension Cache] ⏰ Cache EXPIRED: productId=${productId.substring(0, 16)}... (${duration}ms)`);
+        console.log(`[Dimension Cache] ⏰ Cache EXPIRED (${duration}ms)`);
         return { found: true, entry, expired: true };
       }
 
       const duration = Date.now() - startTime;
-      console.log(`[Dimension Cache] ✅ Cache HIT: productId=${productId.substring(0, 16)}... (${duration}ms)`);
+      console.log(`[Dimension Cache] ✅ Cache HIT (${duration}ms)`);
 
       return { found: true, entry, expired: false };
     } catch (error) {
@@ -120,7 +120,7 @@ export class DimensionCacheService {
         { upsert: true }
       );
 
-      console.log(`[Dimension Cache] 💾 Stored: productId=${entry.productId.substring(0, 16)}..., confidence=${entry.overallConfidence.toFixed(2)}`);
+      console.log(`[Dimension Cache] 💾 Stored: confidence=${entry.overallConfidence.toFixed(2)}`);
     } catch (error) {
       console.error('[Dimension Cache] Store error:', error);
       throw error;
@@ -147,7 +147,7 @@ export class DimensionCacheService {
         }
       );
 
-      console.log(`[Dimension Cache] 🔄 Updated access: productId=${productId.substring(0, 16)}...`);
+      console.log(`[Dimension Cache] 🔄 Updated access`);
     } catch (error) {
       console.error('[Dimension Cache] Update access error:', error);
       // Don't throw - access tracking is best-effort
@@ -168,9 +168,9 @@ export class DimensionCacheService {
       const result = await collection.deleteOne({ productId });
 
       if (result.deletedCount > 0) {
-        console.log(`[Dimension Cache] 🗑️  Invalidated: productId=${productId.substring(0, 16)}...`);
+        console.log(`[Dimension Cache] 🗑️  Invalidated`);
       } else {
-        console.log(`[Dimension Cache] ⚠️  No entry to invalidate: productId=${productId.substring(0, 16)}...`);
+        console.log(`[Dimension Cache] ⚠️  No entry to invalidate`);
       }
     } catch (error) {
       console.error('[Dimension Cache] Invalidate error:', error);

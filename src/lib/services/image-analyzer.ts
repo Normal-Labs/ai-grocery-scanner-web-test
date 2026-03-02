@@ -74,8 +74,8 @@ export class ImageAnalyzerService {
       };
     } catch (error) {
       const processingTimeMs = Date.now() - startTime;
-      
-      console.error('[Image Analyzer] ❌ Image analysis failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[Image Analyzer] ❌ Image analysis failed:', errorMessage);
 
       return {
         success: false,

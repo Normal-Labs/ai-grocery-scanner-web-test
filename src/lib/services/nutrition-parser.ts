@@ -188,7 +188,8 @@ export class NutritionParser {
       return nutritionalFacts;
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[NutritionParser] ❌ Parsing failed (${duration}ms):`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[NutritionParser] ❌ Parsing failed (${duration}ms):`, errorMessage);
       throw error;
     }
   }

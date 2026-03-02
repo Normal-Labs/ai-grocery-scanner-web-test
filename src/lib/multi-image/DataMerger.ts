@@ -117,6 +117,13 @@ export class DataMerger {
       imageType,
       hasExisting: !!existingProduct,
       existingId: existingProduct?.id,
+      newData: {
+        productName: newImageData.productName,
+        brandName: newImageData.brandName,
+        barcode: newImageData.barcode,
+        size: newImageData.size,
+        category: newImageData.category,
+      },
     });
 
     const conflicts: ConflictInfo[] = [];
@@ -287,41 +294,9 @@ export class DataMerger {
         update.barcode = newData.barcode; // Most recent wins
       }
       
-      if (newData.productName && newData.productName !== existing.name) {
-        this.handleConflict(
-          conflicts,
-          'name',
-          existing.name,
-          newData.productName,
-          'existing',
-          imageType,
-          existing.updated_at,
-          newData.timestamp
-        );
-        update.name = newData.productName;
-      }
-      
-      if (newData.brandName && newData.brandName !== existing.brand) {
-        this.handleConflict(
-          conflicts,
-          'brand',
-          existing.brand,
-          newData.brandName,
-          'existing',
-          imageType,
-          existing.updated_at,
-          newData.timestamp
-        );
-        update.brand = newData.brandName;
-      }
-    }
-
-    // Product metadata fields
-    // Requirement 6.3: Populate from Packaging_Analyzer results
-    if (imageType === 'packaging') {
-      // Packaging has priority for metadata
       if (newData.productName) {
-        if (newData.productName !== existing.name) {
+        // Update if different OR if existing is placeholder
+        if (newData.productName !== existing.name || existing.name === 'Unknown Product') {
           this.handleConflict(
             conflicts,
             'name',
@@ -337,7 +312,8 @@ export class DataMerger {
       }
       
       if (newData.brandName) {
-        if (newData.brandName !== existing.brand) {
+        // Update if different OR if existing is placeholder
+        if (newData.brandName !== existing.brand || existing.brand === 'Unknown Brand') {
           this.handleConflict(
             conflicts,
             'brand',
@@ -350,6 +326,54 @@ export class DataMerger {
           );
         }
         update.brand = newData.brandName;
+      }
+    }
+
+    // Product metadata fields
+    // Requirement 6.3: Populate from Packaging_Analyzer results
+    if (imageType === 'packaging') {
+      console.log('[DataMerger] 📦 Processing packaging data:', {
+        newProductName: newData.productName,
+        existingName: existing.name,
+        newBrandName: newData.brandName,
+        existingBrand: existing.brand,
+      });
+      
+      // Packaging has priority for metadata
+      if (newData.productName) {
+        // Update if different OR if existing is placeholder
+        if (newData.productName !== existing.name || existing.name === 'Unknown Product') {
+          this.handleConflict(
+            conflicts,
+            'name',
+            existing.name,
+            newData.productName,
+            'existing',
+            imageType,
+            existing.updated_at,
+            newData.timestamp
+          );
+        }
+        update.name = newData.productName;
+        console.log('[DataMerger] ✅ Updating name to:', newData.productName);
+      }
+      
+      if (newData.brandName) {
+        // Update if different OR if existing is placeholder
+        if (newData.brandName !== existing.brand || existing.brand === 'Unknown Brand') {
+          this.handleConflict(
+            conflicts,
+            'brand',
+            existing.brand,
+            newData.brandName,
+            'existing',
+            imageType,
+            existing.updated_at,
+            newData.timestamp
+          );
+        }
+        update.brand = newData.brandName;
+        console.log('[DataMerger] ✅ Updating brand to:', newData.brandName);
       }
       
       if (newData.size) {
@@ -657,10 +681,22 @@ export class DataMerger {
    */
   private async updateCache(product: Product, imageHash: string): Promise<void> {
     try {
+      // Convert Product to ProductData format (null -> undefined for optional fields)
+      const productData = {
+        ...product,
+        barcode: product.barcode ?? undefined,
+        size: product.size ?? undefined,
+        category: product.category ?? undefined,
+        image_url: product.image_url ?? undefined,
+        metadata: product.metadata ?? undefined,
+        nutrition_data: product.nutrition_data ?? undefined,
+        health_score: product.health_score ?? undefined,
+      };
+      
       await cacheService.store(
         imageHash,
         'imageHash',
-        product,
+        productData as any, // Type assertion needed due to Product vs ProductData differences
         1, // tier (not used for multi-image)
         1.0 // confidence
       );

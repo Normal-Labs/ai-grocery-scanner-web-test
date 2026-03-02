@@ -79,7 +79,7 @@ export class ImageClassifier {
       let imageHash: string;
       try {
         imageHash = await hashImage(imageData);
-        console.log('[ImageClassifier] 🔑 Generated image hash:', imageHash.substring(0, 16) + '...');
+        console.log('[ImageClassifier] 🔑 Generated image hash');
       } catch (error) {
         console.error('[ImageClassifier] ⚠️  Failed to generate image hash, skipping cache:', error);
         // Continue without caching if hash generation fails
@@ -110,7 +110,8 @@ export class ImageClassifier {
       return classification;
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[ImageClassifier] ❌ Classification failed (${duration}ms):`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[ImageClassifier] ❌ Classification failed (${duration}ms):`, errorMessage);
       throw error;
     }
   }
@@ -160,7 +161,8 @@ export class ImageClassifier {
           ],
         });
       } catch (apiError) {
-        console.error('[ImageClassifier] ❌ Gemini API call failed:', apiError);
+        const errorMessage = apiError instanceof Error ? apiError.message : String(apiError);
+        console.error('[ImageClassifier] ❌ Gemini API call failed:', errorMessage);
         if (apiError instanceof Error) {
           console.error('[ImageClassifier] Error name:', apiError.name);
           console.error('[ImageClassifier] Error message:', apiError.message);
@@ -192,7 +194,8 @@ export class ImageClassifier {
 
       return classification;
     } catch (error) {
-      console.error('[ImageClassifier] ❌ Classification failed in classifyWithoutCache:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[ImageClassifier] ❌ Classification failed in classifyWithoutCache:', errorMessage);
       throw error;
     }
   }

@@ -62,8 +62,8 @@ export class VisualExtractorService {
       };
     } catch (error) {
       const processingTimeMs = Date.now() - startTime;
-      
-      console.error('[Visual Extractor] ❌ Text extraction failed:', error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('[Visual Extractor] ❌ Text extraction failed:', errorMessage);
 
       return {
         success: false,

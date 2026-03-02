@@ -17,11 +17,13 @@ import ProgressTracker from '@/components/ProgressTracker';
 import NutritionInsightsDisplay from '@/components/NutritionInsightsDisplay';
 import GuidedCaptureUI from '@/components/GuidedCaptureUI';
 import CompletionPrompt from '@/components/CompletionPrompt';
+import ProductHeroToggle from '@/components/ProductHeroToggle';
 import { useProductHero } from '@/contexts/ProductHeroContext';
 import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
 import type { SavedScan } from '@/lib/types';
 import type { ImageType } from '@/lib/multi-image/DataMerger';
-import { multiImageOrchestrator } from '@/lib/multi-image/MultiImageOrchestrator';
+// TODO: MultiImageOrchestrator should be called from API routes, not client
+// import { multiImageOrchestrator } from '@/lib/multi-image/MultiImageOrchestrator';
 import { useAuth } from '@/contexts/AuthContext';
 
 interface ProgressStep {
@@ -104,9 +106,18 @@ export default function ScanPage() {
   const [guidedCaptureStep, setGuidedCaptureStep] = useState<number>(1);
   const [capturedImageTypes, setCapturedImageTypes] = useState<ImageType[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [pendingGuidedImageType, setPendingGuidedImageType] = useState<ImageType | null>(null);
   
   // Requirement 14.1, 14.2, 14.3: Determine workflow mode based on Product Hero flag
   const workflowMode: 'guided' | 'progressive' = isProductHero ? 'guided' : 'progressive';
+
+  // Reset session when workflow mode changes
+  useEffect(() => {
+    console.log('[Scan Page] Workflow mode changed to:', workflowMode);
+    setSessionId(null);
+    setGuidedCaptureStep(1);
+    setCapturedImageTypes([]);
+  }, [workflowMode]);
 
   // Check for history on client side only
   useEffect(() => {
@@ -123,6 +134,21 @@ export default function ScanPage() {
     image?: string;
     imageMimeType?: string;
   }) => {
+    // Check if this is a guided capture with pending image type
+    if (workflowMode === 'guided' && pendingGuidedImageType && scanData.image) {
+      console.log('[Scan Page] 📸 Guided capture via scanner:', pendingGuidedImageType);
+      
+      // Close scanner
+      setShowScanner(false);
+      
+      // Process through guided capture handler
+      await handleGuidedImageCapture(pendingGuidedImageType, scanData.image);
+      
+      // Clear pending type
+      setPendingGuidedImageType(null);
+      return;
+    }
+    
     const startTime = Date.now(); // Track start time
     setLoading(true);
     setError(null);
@@ -458,7 +484,7 @@ export default function ScanPage() {
 
   /**
    * Process image through MultiImageOrchestrator for progressive mode
-   * Requirements 2.1, 2.2, 7.1: Use orchestrator for multi-image workflow
+   * Requirements 2.1, 2.2, 7.1: Use orchestrator for multi-image workflow via API
    */
   const processImageThroughOrchestrator = async (imageData: string) => {
     try {
@@ -467,14 +493,26 @@ export default function ScanPage() {
       // Get userId from auth context
       const userId = user?.id || 'anonymous-' + Date.now();
       
-      // Call MultiImageOrchestrator.processImage()
-      const orchestratorResult = await multiImageOrchestrator.processImage(
-        { base64: imageData },
-        userId,
-        workflowMode, // 'progressive'
-        sessionId || undefined
-      );
+      // Call API route
+      const response = await fetch('/api/scan-multi-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageData,
+          userId,
+          workflowMode: 'progressive',
+          sessionId: sessionId || undefined,
+        }),
+      });
       
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process image');
+      }
+      
+      const orchestratorResult = await response.json();
       console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
       
       // Update session ID if this is the first capture or if session expired
@@ -486,7 +524,6 @@ export default function ScanPage() {
       if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
         console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
         // You could display this as a toast notification or info banner
-        // For now, we'll just log it - the UI can be enhanced later
       }
       
       // Update captured types for completion prompt
@@ -635,7 +672,7 @@ export default function ScanPage() {
   /**
    * Handle guided capture image submission
    * Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true
-   * Requirements 2.1, 2.2: Call MultiImageOrchestrator.processImage()
+   * Requirements 2.1, 2.2: Call MultiImageOrchestrator.processImage() via API
    */
   const handleGuidedImageCapture = async (imageType: ImageType, imageData: string) => {
     setLoading(true);
@@ -647,15 +684,27 @@ export default function ScanPage() {
       // Get userId from auth context
       const userId = user?.id || 'anonymous-' + Date.now();
       
-      // Call MultiImageOrchestrator.processImage()
-      // Requirements 2.1, 2.2: Pass userId, workflowMode, and sessionId to orchestrator
-      const orchestratorResult = await multiImageOrchestrator.processImage(
-        { base64: imageData },
-        userId,
-        workflowMode, // 'guided'
-        sessionId || undefined
-      );
+      // Call API route
+      const response = await fetch('/api/scan-multi-image', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          imageData,
+          userId,
+          workflowMode: 'guided',
+          sessionId: sessionId || undefined,
+          imageType,
+        }),
+      });
       
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to process image');
+      }
+      
+      const orchestratorResult = await response.json();
       console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
       
       // Update session ID if this is the first capture or if session expired
@@ -667,7 +716,6 @@ export default function ScanPage() {
       if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
         console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
         // You could display this as a toast notification or info banner
-        // For now, we'll just log it - the UI can be enhanced later
       }
       
       // Update captured types
@@ -721,6 +769,16 @@ export default function ScanPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /**
+   * Handle request to open scanner for guided capture
+   * Opens scanner modal and stores the expected image type
+   */
+  const handleGuidedCaptureRequest = (imageType: ImageType) => {
+    console.log('[Scan Page] 📸 Opening scanner for guided capture:', imageType);
+    setPendingGuidedImageType(imageType);
+    setShowScanner(true);
   };
 
   /**
@@ -778,6 +836,13 @@ export default function ScanPage() {
       </div>
 
       <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
+        {/* Product Hero Toggle - Show when not in scanner or history view */}
+        {!showHistory && !showScanner && !loading && (
+          <div className="mb-6">
+            <ProductHeroToggle />
+          </div>
+        )}
+
         {/* Guided Capture UI - Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true */}
         {workflowMode === 'guided' && !showHistory && !showScanner && (
           <div className="space-y-6">
@@ -800,16 +865,14 @@ export default function ScanPage() {
             <GuidedCaptureUI
               currentStep={guidedCaptureStep}
               onImageCapture={handleGuidedImageCapture}
+              onCaptureRequest={handleGuidedCaptureRequest}
               isProcessing={loading}
               error={error?.message}
             />
           </div>
         )}
 
-        {/* Progressive Capture UI - Requirement 14.3: Route to progressive capture UI if isProductHero is false */}
-        {workflowMode === 'progressive' && !showHistory && !showScanner && (
-          <>
-        {/* Scanner Modal */}
+        {/* Scanner Modal - Should be accessible from both guided and progressive modes */}
         {showScanner && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
             <div className="flex-1 overflow-auto">
@@ -824,6 +887,9 @@ export default function ScanPage() {
           </div>
         )}
 
+        {/* Progressive Capture UI - Requirement 14.3: Route to progressive capture UI if isProductHero is false */}
+        {workflowMode === 'progressive' && !showHistory && !showScanner && (
+          <>
         {/* History View */}
         {showHistory ? (
           <div className="space-y-4">
@@ -1256,29 +1322,31 @@ export default function ScanPage() {
                 ⚠️ Report Incorrect Identification
               </button>
             )}
+
+            {/* Completion Prompt - Show in progressive mode when product has partial data */}
+            {workflowMode === 'progressive' && capturedImageTypes.length > 0 && capturedImageTypes.length < 3 && (
+              <div className="mt-4">
+                <CompletionPrompt
+                  capturedTypes={capturedImageTypes}
+                  onCaptureRequest={handleCompletionCaptureRequest}
+                  isProcessing={loading}
+                />
+              </div>
+            )}
             </>
             )}
           </div>
         )}
-
-        {/* Completion Prompt - Show in progressive mode when product has partial data */}
-        {workflowMode === 'progressive' && result && !loading && capturedImageTypes.length > 0 && capturedImageTypes.length < 3 && (
-          <div className="mt-4">
-            <CompletionPrompt
-              capturedTypes={capturedImageTypes}
-              onCaptureRequest={handleCompletionCaptureRequest}
-              isProcessing={loading}
-            />
-          </div>
-        )}
-
-        {/* Info Section - removed */}
-          </>
-        )}
+        </>
+        )
+        }
+        </>
+        )
+        }
       </div>
 
-      {/* Footer with Scan and History Buttons */}
-      {!showHistory && !showScanner && (
+      {/* Footer with Scan and History Buttons - Hide in guided mode since GuidedCaptureUI has its own capture button */}
+      {!showHistory && !showScanner && workflowMode === 'progressive' && (
         <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40">
           <div className="max-w-4xl mx-auto px-4 py-3">
             <div className="flex gap-3">

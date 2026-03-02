@@ -110,7 +110,13 @@ export class GeminiClient {
     try {
       console.log('[Gemini Client] 📝 Extracting text from image...');
 
-      const imageDataUrl = `data:${image.mimeType};base64,${image.base64}`;
+      // Strip data URL prefix if it exists
+      let base64Data = image.base64;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1];
+      }
+
+      const imageDataUrl = `data:${image.mimeType};base64,${base64Data}`;
 
       const result = await generateText({
         model: google(this.model),
@@ -153,7 +159,8 @@ Be concise and accurate.`
       return extractedText;
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[Gemini Client] ❌ Text extraction failed (${duration}ms):`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Gemini Client] ❌ Text extraction failed (${duration}ms):`, errorMessage);
       throw error;
     }
   }
@@ -175,7 +182,13 @@ Be concise and accurate.`
     try {
       console.log('[Gemini Client] 🔍 Analyzing product image...');
 
-      const imageDataUrl = `data:${image.mimeType};base64,${image.base64}`;
+      // Strip data URL prefix if it exists
+      let base64Data = image.base64;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1];
+      }
+
+      const imageDataUrl = `data:${image.mimeType};base64,${base64Data}`;
 
       const result = await generateText({
         model: google(this.model),
@@ -244,7 +257,8 @@ Return ONLY the JSON object, no additional text.`
       };
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[Gemini Client] ❌ Product analysis failed (${duration}ms):`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Gemini Client] ❌ Product analysis failed (${duration}ms):`, errorMessage);
       throw error;
     }
   }
@@ -271,7 +285,13 @@ Return ONLY the JSON object, no additional text.`
 
       console.log('[Gemini Client] 🎯 Analyzing product dimensions...');
 
-      const imageDataUrl = `data:${image.mimeType};base64,${image.base64}`;
+      // Strip data URL prefix if it exists
+      let base64Data = image.base64;
+      if (base64Data.startsWith('data:')) {
+        base64Data = base64Data.split(',')[1];
+      }
+
+      const imageDataUrl = `data:${image.mimeType};base64,${base64Data}`;
 
       // Build analysis prompt (Requirement 12.1-12.6)
       const prompt = this.buildDimensionAnalysisPrompt(productData);
@@ -305,7 +325,8 @@ Return ONLY the JSON object, no additional text.`
       return result.text;
     } catch (error) {
       const duration = Date.now() - startTime;
-      console.error(`[Gemini Client] ❌ Dimension analysis failed (${duration}ms):`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`[Gemini Client] ❌ Dimension analysis failed (${duration}ms):`, errorMessage);
       
       // Record failure for circuit breaker
       this.dimensionCircuitBreaker.recordFailure();

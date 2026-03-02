@@ -137,14 +137,17 @@ export class MonitoringService {
     error: string,
     imageHash?: string
   ): void {
+    // Truncate error message if it's too long (likely contains base64 data)
+    const truncatedError = error.length > 200 ? error.substring(0, 200) + '... (truncated)' : error;
+    
     console.error('[Monitoring] ❌ Analyzer failed:', {
       analyzerType,
-      error,
+      error: truncatedError,
       imageHash,
     });
     this.recordMetric('analyzer_failure', 1, {
       analyzerType,
-      error,
+      error: truncatedError,
       imageHash,
     });
     this.checkAlertThreshold('analyzer_failure', analyzerType);

@@ -56,7 +56,7 @@ export class CacheService {
         );
 
         const duration = Date.now() - startTime;
-        console.log(`[Cache Service] ✅ Cache HIT: ${keyType}=${key.substring(0, 16)}... (${duration}ms)`);
+        console.log(`[Cache Service] ✅ Cache HIT: ${keyType} (${duration}ms)`);
 
         return {
           hit: true,
@@ -69,7 +69,7 @@ export class CacheService {
       }
 
       const duration = Date.now() - startTime;
-      console.log(`[Cache Service] ❌ Cache MISS: ${keyType}=${key.substring(0, 16)}... (${duration}ms)`);
+      console.log(`[Cache Service] ❌ Cache MISS: ${keyType} (${duration}ms)`);
 
       return { hit: false };
     } catch (error) {
@@ -122,7 +122,7 @@ export class CacheService {
         { upsert: true }
       );
 
-      console.log(`[Cache Service] 💾 Stored: ${keyType}=${key.substring(0, 16)}..., tier=${tier}, confidence=${confidenceScore.toFixed(2)}`);
+      console.log(`[Cache Service] 💾 Stored: ${keyType}, tier=${tier}, confidence=${confidenceScore.toFixed(2)}`);
     } catch (error) {
       console.error('[Cache Service] Store error:', error);
       throw error;
@@ -144,9 +144,9 @@ export class CacheService {
       const result = await collection.deleteOne({ key, keyType });
 
       if (result.deletedCount > 0) {
-        console.log(`[Cache Service] 🗑️  Invalidated: ${keyType}=${key.substring(0, 16)}...`);
+        console.log(`[Cache Service] 🗑️  Invalidated: ${keyType}`);
       } else {
-        console.log(`[Cache Service] ⚠️  No entry to invalidate: ${keyType}=${key.substring(0, 16)}...`);
+        console.log(`[Cache Service] ⚠️  No entry to invalidate: ${keyType}`);
       }
     } catch (error) {
       console.error('[Cache Service] Invalidate error:', error);
@@ -276,7 +276,7 @@ export class CacheService {
         { upsert: true }
       );
 
-      console.log(`[Cache Service] 🔄 Restored snapshot: ${snapshot.keyType}=${snapshot.key.substring(0, 16)}...`);
+      console.log(`[Cache Service] 🔄 Restored snapshot: ${snapshot.keyType}`);
     } catch (error) {
       console.error('[Cache Service] Restore snapshot error:', error);
       throw error;

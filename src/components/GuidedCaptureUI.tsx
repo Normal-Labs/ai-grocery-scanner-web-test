@@ -9,7 +9,6 @@
 
 'use client';
 
-import { useState } from 'react';
 import { ImageType } from '@/lib/multi-image/DataMerger';
 
 interface GuidedCaptureUIProps {
@@ -17,6 +16,8 @@ interface GuidedCaptureUIProps {
   currentStep: number;
   /** Callback when image is captured */
   onImageCapture: (imageType: ImageType, imageData: string) => Promise<void>;
+  /** Callback to request scanner opening */
+  onCaptureRequest: (imageType: ImageType) => void;
   /** Whether capture is in progress */
   isProcessing?: boolean;
   /** Error message if any */
@@ -75,31 +76,16 @@ const STEPS: Array<{
 export default function GuidedCaptureUI({
   currentStep,
   onImageCapture,
+  onCaptureRequest,
   isProcessing = false,
   error,
 }: GuidedCaptureUIProps) {
-  const [capturedImage, setCapturedImage] = useState<string | null>(null);
-
   const currentStepConfig = STEPS[currentStep - 1];
   const isComplete = currentStep > 3;
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    // Convert to base64
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const base64 = e.target?.result as string;
-      setCapturedImage(base64);
-      
-      try {
-        await onImageCapture(currentStepConfig.imageType, base64);
-      } catch (error) {
-        console.error('Failed to process image:', error);
-      }
-    };
-    reader.readAsDataURL(file);
+  const handleCaptureClick = () => {
+    // Request scanner to open for this image type
+    onCaptureRequest(currentStepConfig.imageType);
   };
 
   if (isComplete) {
@@ -214,36 +200,26 @@ export default function GuidedCaptureUI({
             </div>
 
             {/* Capture Button */}
-            <div className="relative">
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileSelect}
-                disabled={isProcessing}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
-                id="guided-capture-input"
-              />
-              <label
-                htmlFor="guided-capture-input"
-                className={`block w-full py-3 px-6 text-center font-semibold rounded-lg transition-colors cursor-pointer ${
-                  isProcessing
-                    ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
-                    : 'bg-blue-600 text-white hover:bg-blue-700'
-                }`}
-              >
-                {isProcessing ? (
-                  <span className="flex items-center justify-center gap-2">
-                    <span className="animate-spin">⏳</span>
-                    Processing...
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center gap-2">
-                    📸 Capture {currentStepConfig.title.split(' ')[1]}
-                  </span>
-                )}
-              </label>
-            </div>
+            <button
+              onClick={handleCaptureClick}
+              disabled={isProcessing}
+              className={`w-full py-3 px-6 text-center font-semibold rounded-lg transition-colors ${
+                isProcessing
+                  ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                  : 'bg-blue-600 text-white hover:bg-blue-700'
+              }`}
+            >
+              {isProcessing ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="animate-spin">⏳</span>
+                  Processing...
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  📸 Capture {currentStepConfig.title.split(' ')[1]}
+                </span>
+              )}
+            </button>
 
             {/* Error Display */}
             {error && (
@@ -256,20 +232,6 @@ export default function GuidedCaptureUI({
           </div>
         </div>
       </div>
-
-      {/* Image Preview */}
-      {capturedImage && (
-        <div className="bg-white rounded-lg p-4 border-2 border-gray-200">
-          <h4 className="text-sm font-semibold text-gray-700 mb-2">
-            Captured Image:
-          </h4>
-          <img
-            src={capturedImage}
-            alt="Captured"
-            className="w-full max-w-md mx-auto rounded-lg"
-          />
-        </div>
-      )}
     </div>
   );
 }

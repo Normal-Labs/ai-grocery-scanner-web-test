@@ -210,6 +210,7 @@ export class ProductMatcher {
       const results = await this.repository.searchByMetadata({
         productName,
         brandName: brand,
+        keywords: [], // Empty keywords array as it's not used for this search
       });
       
       if (results.length === 0) {

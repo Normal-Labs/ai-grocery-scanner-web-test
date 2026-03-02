@@ -136,7 +136,7 @@ export async function POST(request: NextRequest) {
 
       // Generate image hash for caching
       imageHash = await hashImage(base64Data);
-      console.log('[Scan API Multi-Tier] 🔐 Generated image hash:', imageHash.substring(0, 16) + '...');
+      console.log('[Scan API Multi-Tier] 🔐 Generated image hash');
     }
 
     // Create scan request
