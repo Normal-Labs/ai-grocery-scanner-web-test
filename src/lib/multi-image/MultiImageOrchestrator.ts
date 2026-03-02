@@ -264,12 +264,17 @@ export class MultiImageOrchestrator {
             
             // Use most recent session as default
             session = allSessions[0];
-          } else if (allSessions.length === 1) {
-            // Use the single active session
+          } else if (allSessions.length === 1 && workflowMode === 'progressive') {
+            // In progressive mode, reuse the single active session
             session = allSessions[0];
             console.log('[MultiImageOrchestrator] ✅ Using existing session:', session.sessionId);
           } else {
-            // No active sessions, create new one
+            // No active sessions, or guided mode with no sessionId - create new one
+            // In guided mode, always create a new session when sessionId is not provided
+            // This ensures each guided workflow starts fresh
+            if (allSessions.length === 1 && workflowMode === 'guided') {
+              console.log('[MultiImageOrchestrator] 🔄 Guided mode: Creating new session instead of reusing existing');
+            }
             session = await this.sessionManager.createSession(userId, workflowMode);
           }
         }

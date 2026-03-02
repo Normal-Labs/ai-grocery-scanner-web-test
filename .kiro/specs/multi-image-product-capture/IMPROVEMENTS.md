@@ -180,3 +180,121 @@ This document summarizes the improvements and bug fixes made to the Product Hero
 - Integration tests for end-to-end workflows
 - Additional error handling edge cases
 - Manual image type selection UI for progressive mode
+
+
+### 8. Display Nutrition Analysis After Workflow Completion
+
+**Problem**: After completing the Product Hero workflow (capturing all three images), the user wasn't seeing the nutrition analysis, health score, or allergen information even though it was saved to the database.
+
+**Solution**:
+- Updated the guided capture handler to check for nutrition data in the product
+- Converts the Product's `nutrition_data`, `health_score`, `has_allergens`, and `allergen_types` to the format expected by `NutritionInsightsDisplay`
+- Sets the `nutritionResult` state when the workflow completes
+- User now sees the complete product profile including nutrition analysis
+
+**Benefits**:
+- ✅ User sees full product information after workflow completion
+- ✅ Health score and nutritional facts displayed
+- ✅ Allergen information shown
+- ✅ Better user experience with complete feedback
+
+**Files Changed**:
+- `src/app/page.tsx`
+
+### 9. Display Dimension Analysis After Workflow Completion
+
+**Problem**: After completing the Product Hero workflow, the dimension analysis data (health, processing, allergens, responsibly produced, environmental impact scores) was saved to the database but not displayed to the user.
+
+**Attempted Solution**:
+- Added logic to fetch dimension analysis after workflow completion
+- When `completionStatus.complete` is true, triggered a dimension analysis request
+- Attempted to update the `result` state with dimension analysis data
+
+**Issue Discovered**:
+- The `/api/scan-multi-tier` endpoint requires either a barcode or image to perform analysis
+- Cannot fetch dimension analysis separately without triggering a full scan
+- This caused a 400 error when trying to fetch dimension analysis after workflow completion
+
+**Status**: Reverted - requires architectural changes to properly integrate dimension analysis
+
+**Proper Solution Needed**:
+- Option 1: Trigger dimension analysis during nutrition label capture (when all data is available)
+- Option 2: Create dedicated dimension analysis endpoint that accepts product ID
+- Option 3: Include dimension analysis in MultiImageOrchestrator response when workflow completes
+
+**Files Changed**:
+- `src/app/page.tsx` (reverted)
+
+### 10. Fix Session Reuse in Guided Mode
+
+**Problem**: When starting a new guided workflow at step 1, the system was reusing an old session that already had all three image types captured. This caused the workflow to immediately mark itself as "complete" on the first image capture.
+
+**Root Cause**: The MultiImageOrchestrator has logic to reuse existing sessions when `sessionId` is `undefined`. This makes sense for progressive mode (where users might want to continue adding images to an existing product), but breaks guided mode (where each workflow should start fresh).
+
+**Solution**:
+- Modified MultiImageOrchestrator to check `workflowMode` when deciding whether to reuse sessions
+- In **guided mode** with no sessionId: Always create a new session (fresh workflow)
+- In **progressive mode** with no sessionId: Reuse existing session if available (continue building product)
+- When sessionId is provided: Always use that specific session (both modes)
+
+**Code Changes**:
+```typescript
+} else if (allSessions.length === 1 && workflowMode === 'progressive') {
+  // In progressive mode, reuse the single active session
+  session = allSessions[0];
+} else {
+  // No active sessions, or guided mode with no sessionId - create new one
+  // In guided mode, always create a new session when sessionId is not provided
+  session = await this.sessionManager.createSession(userId, workflowMode);
+}
+```
+
+**Benefits**:
+- ✅ Fresh session for each new guided workflow
+- ✅ Prevents false "workflow complete" status on first image
+- ✅ Proper step progression through all three captures
+- ✅ Progressive mode still works as expected (can continue existing products)
+- ✅ No more reusing old session data in guided mode
+
+**Files Changed**:
+- `src/lib/multi-image/MultiImageOrchestrator.ts`
+- `src/app/page.tsx` (session reset logic)
+
+
+### 11. Display Results After Guided Workflow Completion
+
+**Problem**: After completing all three steps of the guided workflow (barcode → packaging → nutrition), the UI remained on the guided capture screen showing step 3. Users couldn't see the nutrition analysis or product information they just captured.
+
+**Root Cause**: When the workflow completed (`orchestratorResult.nextStep` was undefined), the code just logged a message but didn't update the UI state. The `guidedCaptureStep` stayed at 3, so the GuidedCaptureUI component continued to be displayed.
+
+**Solution**:
+- Set `guidedCaptureStep` to 4 when workflow completes (no nextStep)
+- Updated rendering logic to only show GuidedCaptureUI when `guidedCaptureStep <= 3`
+- When step is 4, the guided capture UI is hidden and the results section is displayed
+- User sees nutrition analysis, product information, and all captured data
+
+**Code Changes**:
+```typescript
+// When workflow completes
+if (orchestratorResult.nextStep) {
+  setGuidedCaptureStep(prev => prev + 1);
+} else {
+  // All images captured, show completion
+  setGuidedCaptureStep(4); // Set to 4 to hide guided UI and show results
+}
+
+// Rendering logic
+{workflowMode === 'guided' && guidedCaptureStep <= 3 && (
+  <GuidedCaptureUI ... />
+)}
+```
+
+**Benefits**:
+- ✅ User sees complete product profile after workflow completion
+- ✅ Nutrition analysis displayed with health score
+- ✅ Product information (name, brand, size, category) shown
+- ✅ Clear visual feedback that workflow is complete
+- ✅ Better user experience with proper completion state
+
+**Files Changed**:
+- `src/app/page.tsx`

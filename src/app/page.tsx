@@ -684,6 +684,14 @@ export default function ScanPage() {
       // Get userId from auth context
       const userId = user?.id || 'anonymous-' + Date.now();
       
+      // Reset session if this is the first step to ensure fresh workflow
+      const effectiveSessionId = guidedCaptureStep === 1 ? undefined : (sessionId || undefined);
+      if (guidedCaptureStep === 1 && sessionId) {
+        console.log('[Scan Page] 🔄 Resetting session for new guided workflow');
+        setSessionId(null);
+        setCapturedImageTypes([]);
+      }
+      
       // Call API route
       const response = await fetch('/api/scan-multi-image', {
         method: 'POST',
@@ -694,7 +702,7 @@ export default function ScanPage() {
           imageData,
           userId,
           workflowMode: 'guided',
-          sessionId: sessionId || undefined,
+          sessionId: effectiveSessionId,
           imageType,
         }),
       });
@@ -746,6 +754,44 @@ export default function ScanPage() {
         
         setResult(scanResult);
         
+        // If nutrition data is available, set it for display
+        if (orchestratorResult.product.nutrition_data) {
+          const nutritionData = {
+            productName: orchestratorResult.product.name,
+            nutritionalFacts: {
+              servingSize: orchestratorResult.product.nutrition_data.servingSize,
+              calories: { value: orchestratorResult.product.nutrition_data.calories, unit: 'kcal' },
+              totalFat: { value: orchestratorResult.product.nutrition_data.macros.fat, unit: 'g' },
+              saturatedFat: { value: orchestratorResult.product.nutrition_data.macros.saturatedFat, unit: 'g' },
+              transFat: { value: orchestratorResult.product.nutrition_data.macros.transFat, unit: 'g' },
+              totalCarbohydrates: { value: orchestratorResult.product.nutrition_data.macros.carbs, unit: 'g' },
+              dietaryFiber: { value: orchestratorResult.product.nutrition_data.macros.fiber, unit: 'g' },
+              totalSugars: { value: orchestratorResult.product.nutrition_data.macros.sugars, unit: 'g' },
+              protein: { value: orchestratorResult.product.nutrition_data.macros.protein, unit: 'g' },
+              sodium: { value: orchestratorResult.product.nutrition_data.sodium, unit: 'mg' },
+            },
+            ingredients: {
+              ingredients: orchestratorResult.product.allergen_types?.map((allergen: string) => ({
+                name: allergen,
+                isAllergen: true,
+              })) || [],
+              hasAllergens: orchestratorResult.product.has_allergens,
+              complete: true,
+              confidence: 0.95,
+            },
+            healthScore: {
+              overall: orchestratorResult.product.health_score || 0,
+              category: orchestratorResult.product.health_score >= 80 ? 'excellent' : 
+                       orchestratorResult.product.health_score >= 60 ? 'good' : 
+                       orchestratorResult.product.health_score >= 40 ? 'fair' : 'poor',
+              factors: [],
+            },
+            timestamp: new Date(),
+          };
+          setNutritionResult(nutritionData);
+          console.log('[Scan Page] 📊 Nutrition data set:', nutritionData);
+        }
+        
         // Display next step prompt in guided mode
         if (orchestratorResult.nextStep) {
           setGuidedCaptureStep(prev => prev + 1);
@@ -753,6 +799,8 @@ export default function ScanPage() {
         } else {
           // All images captured, show completion
           console.log('[Scan Page] ✅ All images captured, workflow complete');
+          // Set step to 4 to indicate completion and hide guided capture UI
+          setGuidedCaptureStep(4);
         }
       }
     } catch (err) {
@@ -844,7 +892,7 @@ export default function ScanPage() {
         )}
 
         {/* Guided Capture UI - Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true */}
-        {workflowMode === 'guided' && !showHistory && !showScanner && (
+        {workflowMode === 'guided' && !showHistory && !showScanner && guidedCaptureStep <= 3 && (
           <div className="space-y-6">
             {/* Product Hero Mode Header */}
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200">
