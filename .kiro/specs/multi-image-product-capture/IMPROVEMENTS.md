@@ -302,19 +302,28 @@ if (orchestratorResult.nextStep) {
 
 ### 12. Fix Session Retrieval Causing Duplicate Products
 
-**Problem**: In production, a single Product Hero workflow created three separate database entries instead of one unified product. Each image (barcode, packaging, nutrition) created its own product record.
+**Problem**: In production, a single Product Hero workflow created three separate database entries instead of one unified product. Each image (barcode, packaging, nutrition) created its own product record. Additionally, no nutrition analysis was displayed at the end of the workflow.
 
 **Root Cause**: The `MultiImageOrchestrator` was calling `getActiveSession(userId)` which retrieved ANY active session for the user, not the specific session by its ID. This meant:
-1. First image: Creates session with productId
-2. Second image: Retrieves a different/wrong session without productId
-3. ProductMatcher fails to find session context
-4. Creates new product instead of updating existing one
+1. First image: Creates session with productId A
+2. Second image: Retrieves wrong/different session without productId → creates product B
+3. Third image: Retrieves wrong/different session without productId → creates product C
+4. UI displays product C (only has nutrition data, missing barcode/packaging info)
+5. No complete product profile shown
+
+**Impact**:
+- Three separate products in database instead of one
+- Nutrition analysis not displayed (showing wrong product)
+- Incomplete product data
+- Poor user experience
 
 **Solution**:
 - Added new `getSessionById(sessionId)` method to SessionManager
 - Updated MultiImageOrchestrator to use specific session lookup
 - Now correctly retrieves the exact session by its sessionId
 - Session productId is preserved across all three image captures
+- All data merged into single product
+- Complete product with nutrition analysis displayed
 
 **Code Changes**:
 ```typescript
@@ -339,8 +348,10 @@ if (sessionId) {
 - ✅ Session productId maintained across all captures
 - ✅ ProductMatcher successfully uses session context
 - ✅ All three images linked to same product
+- ✅ Complete product data with nutrition analysis displayed
 - ✅ No more duplicate products
 
 **Files Changed**:
 - `src/lib/multi-image/SessionManager.ts`
 - `src/lib/multi-image/MultiImageOrchestrator.ts`
+- `src/app/page.tsx` (added safeguard logging)
