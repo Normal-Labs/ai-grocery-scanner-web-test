@@ -127,11 +127,13 @@ Return format: Just the barcode number (e.g., "012345678901")`;
           .from('products_dev')
           .insert({
             barcode,
-            detection_method: method,
-            confidence,
-            raw_ocr_text: rawText,
-            image_data: image.substring(0, 100) + '...', // Store truncated for reference
-            created_at: new Date().toISOString(),
+            metadata: {
+              detection_method: method,
+              confidence,
+              raw_ocr_text: rawText,
+              image_preview: image.substring(0, 100) + '...',
+              extraction_type: 'barcode',
+            },
           });
 
         if (dbError) {

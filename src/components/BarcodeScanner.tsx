@@ -36,9 +36,10 @@ declare global {
 interface BarcodeScannerProps {
   onScanComplete: (result: { barcode?: string; image?: string; imageMimeType?: string }) => void;
   onError?: (error: string) => void;
+  scanType?: 'barcode' | 'packaging' | 'ingredients' | 'nutrition facts';
 }
 
-export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onScanComplete, onError, scanType = 'barcode' }: BarcodeScannerProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [detectedBarcode, setDetectedBarcode] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -289,18 +290,30 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
 
       {isScanning && (
         <div className="relative flex-1 flex flex-col bg-black">
+          {/* Close button - top right */}
+          <button
+            onClick={stopCamera}
+            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
+          >
+            ✕ Close
+          </button>
+
+          {/* Camera feed */}
           <video
             ref={videoRef}
             className="w-full h-full object-cover"
             playsInline
             muted
           />
-          
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-            <div className="border-4 border-green-500 rounded-lg w-64 h-64 opacity-50" />
-          </div>
 
+          {/* Bottom controls */}
           <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black to-transparent">
+            {/* Instruction text */}
+            <p className="text-center text-white text-base mb-4">
+              Point camera at {scanType} and take a picture
+            </p>
+
+            {/* Action buttons */}
             <div className="flex gap-4 justify-center">
               <button
                 onClick={stopCamera}
@@ -314,15 +327,9 @@ export default function BarcodeScanner({ onScanComplete, onError }: BarcodeScann
                 disabled={processing}
                 className="px-8 py-4 bg-white text-gray-900 rounded-full font-semibold hover:bg-gray-100 disabled:bg-gray-400 transition-colors text-lg"
               >
-                {processing ? '⏳ Processing...' : '📸 Capture'}
+                {processing ? '⏳ Processing...' : '📷 Capture'}
               </button>
             </div>
-
-            {barcodeDetectorSupported && (
-              <p className="mt-4 text-center text-sm text-white">
-                📱 Point camera at barcode or product packaging
-              </p>
-            )}
           </div>
         </div>
       )}

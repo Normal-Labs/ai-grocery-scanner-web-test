@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS products_dev (
   brand TEXT,
   size TEXT,
   category TEXT,
+  packaging_type TEXT,
   notes TEXT
 );
 

@@ -1,34 +1,37 @@
 'use client';
 
 /**
- * Barcode Extraction Test Page
+ * Packaging Extraction Test Page
  * 
- * Isolated testing environment for barcode detection and extraction.
+ * Isolated testing environment for product packaging information extraction.
+ * Extracts: product name, brand, size, category, packaging type.
  * Saves results to products_dev table for analysis.
  */
 
 import { useState } from 'react';
-import BarcodeScanner from '@/components/BarcodeScanner';
+import ImageScanner from '@/components/ImageScanner';
 
-interface ExtractionResult {
-  method: 'BarcodeDetector' | 'OCR' | 'Failed';
-  barcode?: string;
+interface PackagingResult {
+  productName?: string;
+  brand?: string;
+  size?: string;
+  category?: string;
+  packagingType?: string;
   rawText?: string;
-  confidence?: number;
+  confidence: number;
   processingTime: number;
   imageSize: number;
   timestamp: Date;
 }
 
-export default function TestBarcodePage() {
+export default function TestPackagingPage() {
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ExtractionResult | null>(null);
+  const [result, setResult] = useState<PackagingResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedToDb, setSavedToDb] = useState(false);
 
-  const handleScanComplete = async (scanData: { 
-    barcode?: string; 
+  const handleScanComplete = async (scanData: {
     image?: string;
     imageMimeType?: string;
   }) => {
@@ -46,21 +49,19 @@ export default function TestBarcodePage() {
     const startTime = Date.now();
     
     try {
-      console.log('[Barcode Test] 📸 Image captured');
-      console.log('[Barcode Test] BarcodeDetector result:', scanData.barcode || 'none');
+      console.log('[Packaging Test] 📸 Image captured');
       
       // Calculate image size
-      const imageSize = Math.round((scanData.image.length * 3) / 4); // Approximate base64 to bytes
+      const imageSize = Math.round((scanData.image.length * 3) / 4);
       
       // Call test API endpoint
-      const response = await fetch('/api/test-barcode-extraction', {
+      const response = await fetch('/api/test-packaging-extraction', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           image: scanData.image,
-          detectedBarcode: scanData.barcode,
         }),
       });
       
@@ -73,9 +74,12 @@ export default function TestBarcodePage() {
       
       const data = await response.json();
       
-      const extractionResult: ExtractionResult = {
-        method: data.method,
-        barcode: data.barcode,
+      const packagingResult: PackagingResult = {
+        productName: data.productName,
+        brand: data.brand,
+        size: data.size,
+        category: data.category,
+        packagingType: data.packagingType,
         rawText: data.rawText,
         confidence: data.confidence,
         processingTime,
@@ -83,13 +87,13 @@ export default function TestBarcodePage() {
         timestamp: new Date(),
       };
       
-      setResult(extractionResult);
+      setResult(packagingResult);
       setSavedToDb(data.savedToDb);
       
-      console.log('[Barcode Test] ✅ Extraction complete:', extractionResult);
+      console.log('[Packaging Test] ✅ Extraction complete:', packagingResult);
       
     } catch (err) {
-      console.error('[Barcode Test] ❌ Error:', err);
+      console.error('[Packaging Test] ❌ Error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -108,10 +112,10 @@ export default function TestBarcodePage() {
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            🔍 Barcode Extraction Test
+            📦 Packaging Extraction Test
           </h1>
           <p className="text-gray-600 text-sm">
-            Test barcode detection and extraction. Results are saved to products_dev table.
+            Test product packaging information extraction. Results are saved to products_dev table.
           </p>
         </div>
 
@@ -120,22 +124,27 @@ export default function TestBarcodePage() {
           <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-4">
             <h2 className="font-bold text-blue-900 mb-2">📋 Instructions</h2>
             <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
-              <li>Click "Scan Barcode" button below</li>
-              <li>Point camera at a product barcode</li>
-              <li>Ensure barcode is clearly visible and well-lit</li>
-              <li>Wait for automatic detection or capture manually</li>
-              <li>Review extraction results</li>
+              <li>Click "Scan Packaging" button below</li>
+              <li>Point camera at product packaging (front label)</li>
+              <li>Ensure product name and brand are clearly visible</li>
+              <li>Click "Capture Image" when ready</li>
+              <li>Review extracted information</li>
             </ol>
+            <div className="mt-3 p-3 bg-blue-100 rounded">
+              <p className="text-xs text-blue-900 font-medium">
+                💡 Tip: Good lighting and clear focus improve extraction accuracy
+              </p>
+            </div>
           </div>
         )}
 
-        {/* Scan Button */}
+        {/* Capture Button */}
         {!result && !loading && (
           <button
             onClick={() => setShowScanner(true)}
             className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg"
           >
-            📷 Scan Barcode
+            📷 Scan Packaging
           </button>
         )}
 
@@ -143,7 +152,7 @@ export default function TestBarcodePage() {
         {loading && (
           <div className="bg-white rounded-lg shadow-lg p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Processing barcode...</p>
+            <p className="text-gray-600">Extracting product information...</p>
           </div>
         )}
 
@@ -170,16 +179,10 @@ export default function TestBarcodePage() {
         {result && (
           <div className="space-y-4">
             {/* Success Banner */}
-            <div className={`rounded-lg p-6 ${
-              result.method === 'Failed' 
-                ? 'bg-red-50 border-2 border-red-300' 
-                : 'bg-green-50 border-2 border-green-300'
-            }`}>
+            <div className="bg-green-50 border-2 border-green-300 rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className={`text-xl font-bold ${
-                  result.method === 'Failed' ? 'text-red-900' : 'text-green-900'
-                }`}>
-                  {result.method === 'Failed' ? '❌ Extraction Failed' : '✅ Barcode Detected'}
+                <h2 className="text-xl font-bold text-green-900">
+                  ✅ Information Extracted
                 </h2>
                 {savedToDb && (
                   <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
@@ -188,59 +191,78 @@ export default function TestBarcodePage() {
                 )}
               </div>
 
-              {/* Barcode Display */}
-              {result.barcode && (
-                <div className="bg-white rounded-lg p-4 mb-4">
-                  <p className="text-sm text-gray-600 mb-1">Barcode Number:</p>
-                  <p className="text-3xl font-mono font-bold text-gray-900">
-                    {result.barcode}
-                  </p>
-                </div>
-              )}
-
-              {/* Method Badge */}
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-sm font-medium text-gray-700">Detection Method:</span>
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  result.method === 'BarcodeDetector' 
-                    ? 'bg-blue-100 text-blue-800'
-                    : result.method === 'OCR'
-                    ? 'bg-purple-100 text-purple-800'
-                    : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {result.method}
-                </span>
-              </div>
-
-              {/* Metrics */}
-              <div className="grid grid-cols-2 gap-4 mb-4">
-                <div className="bg-white rounded-lg p-3">
-                  <p className="text-xs text-gray-600 mb-1">Processing Time</p>
-                  <p className="text-lg font-bold text-gray-900">{result.processingTime}ms</p>
-                </div>
-                <div className="bg-white rounded-lg p-3">
-                  <p className="text-xs text-gray-600 mb-1">Image Size</p>
+              {/* Extracted Fields */}
+              <div className="space-y-3">
+                {/* Product Name */}
+                <div className="bg-white rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Product Name:</p>
                   <p className="text-lg font-bold text-gray-900">
-                    {(result.imageSize / 1024).toFixed(1)}KB
+                    {result.productName || '(not detected)'}
                   </p>
                 </div>
-                {result.confidence !== undefined && (
-                  <div className="bg-white rounded-lg p-3 col-span-2">
-                    <p className="text-xs text-gray-600 mb-1">OCR Confidence</p>
-                    <p className="text-lg font-bold text-gray-900">
-                      {(result.confidence * 100).toFixed(0)}%
+
+                {/* Brand */}
+                <div className="bg-white rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Brand:</p>
+                  <p className="text-lg font-semibold text-gray-900">
+                    {result.brand || '(not detected)'}
+                  </p>
+                </div>
+
+                {/* Size */}
+                <div className="bg-white rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Size/Quantity:</p>
+                  <p className="text-lg font-medium text-gray-900">
+                    {result.size || '(not detected)'}
+                  </p>
+                </div>
+
+                {/* Category */}
+                <div className="bg-white rounded-lg p-4">
+                  <p className="text-xs text-gray-600 mb-1">Category:</p>
+                  <p className="text-lg font-medium text-gray-900">
+                    {result.category || '(not detected)'}
+                  </p>
+                </div>
+
+                {/* Packaging Type */}
+                {result.packagingType && (
+                  <div className="bg-white rounded-lg p-4">
+                    <p className="text-xs text-gray-600 mb-1">Packaging Type:</p>
+                    <p className="text-lg font-medium text-gray-900">
+                      {result.packagingType}
                     </p>
                   </div>
                 )}
               </div>
 
+              {/* Metrics */}
+              <div className="grid grid-cols-2 gap-4 mt-4">
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-600 mb-1">Processing Time</p>
+                  <p className="text-lg font-bold text-gray-900">{result.processingTime}ms</p>
+                </div>
+                <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-600 mb-1">Confidence</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    {(result.confidence * 100).toFixed(0)}%
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg p-3 col-span-2">
+                  <p className="text-xs text-gray-600 mb-1">Image Size</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    {(result.imageSize / 1024).toFixed(1)}KB
+                  </p>
+                </div>
+              </div>
+
               {/* Raw Text (for debugging) */}
               {result.rawText && (
-                <details className="bg-white rounded-lg p-3">
+                <details className="bg-white rounded-lg p-3 mt-4">
                   <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                    View Raw OCR Text
+                    View Raw Extracted Text
                   </summary>
-                  <pre className="mt-2 text-xs text-gray-600 whitespace-pre-wrap font-mono">
+                  <pre className="mt-2 text-xs text-gray-600 whitespace-pre-wrap font-mono max-h-48 overflow-auto">
                     {result.rawText}
                   </pre>
                 </details>
@@ -253,7 +275,7 @@ export default function TestBarcodePage() {
                 onClick={handleReset}
                 className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
               >
-                Test Another Barcode
+                Test Another Product
               </button>
               <button
                 onClick={() => window.location.href = '/'}
@@ -268,8 +290,8 @@ export default function TestBarcodePage() {
         {/* Scanner Modal */}
         {showScanner && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            <BarcodeScanner
-              scanType="barcode"
+            <ImageScanner
+              scanType="packaging"
               onScanComplete={handleScanComplete}
               onError={(error) => {
                 setError(error);

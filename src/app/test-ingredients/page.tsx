@@ -1,34 +1,34 @@
 'use client';
 
 /**
- * Barcode Extraction Test Page
+ * Ingredients Extraction Test Page
  * 
- * Isolated testing environment for barcode detection and extraction.
+ * Isolated testing environment for ingredient list extraction.
+ * Extracts: complete ingredient list with sub-ingredients preserved.
  * Saves results to products_dev table for analysis.
  */
 
 import { useState } from 'react';
-import BarcodeScanner from '@/components/BarcodeScanner';
+import ImageScanner from '@/components/ImageScanner';
 
-interface ExtractionResult {
-  method: 'BarcodeDetector' | 'OCR' | 'Failed';
-  barcode?: string;
+interface IngredientsResult {
+  ingredients: string[];
   rawText?: string;
-  confidence?: number;
+  confidence: number;
+  ingredientCount: number;
   processingTime: number;
   imageSize: number;
   timestamp: Date;
 }
 
-export default function TestBarcodePage() {
+export default function TestIngredientsPage() {
   const [showScanner, setShowScanner] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ExtractionResult | null>(null);
+  const [result, setResult] = useState<IngredientsResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savedToDb, setSavedToDb] = useState(false);
 
-  const handleScanComplete = async (scanData: { 
-    barcode?: string; 
+  const handleScanComplete = async (scanData: {
     image?: string;
     imageMimeType?: string;
   }) => {
@@ -46,21 +46,19 @@ export default function TestBarcodePage() {
     const startTime = Date.now();
     
     try {
-      console.log('[Barcode Test] 📸 Image captured');
-      console.log('[Barcode Test] BarcodeDetector result:', scanData.barcode || 'none');
+      console.log('[Ingredients Test] 📸 Image captured');
       
       // Calculate image size
-      const imageSize = Math.round((scanData.image.length * 3) / 4); // Approximate base64 to bytes
+      const imageSize = Math.round((scanData.image.length * 3) / 4);
       
       // Call test API endpoint
-      const response = await fetch('/api/test-barcode-extraction', {
+      const response = await fetch('/api/test-ingredients-extraction', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           image: scanData.image,
-          detectedBarcode: scanData.barcode,
         }),
       });
       
@@ -73,23 +71,27 @@ export default function TestBarcodePage() {
       
       const data = await response.json();
       
-      const extractionResult: ExtractionResult = {
-        method: data.method,
-        barcode: data.barcode,
+      if (!data.success || !data.ingredients || data.ingredients.length === 0) {
+        throw new Error('No ingredients found in image');
+      }
+      
+      const ingredientsResult: IngredientsResult = {
+        ingredients: data.ingredients,
         rawText: data.rawText,
         confidence: data.confidence,
+        ingredientCount: data.ingredientCount,
         processingTime,
         imageSize,
         timestamp: new Date(),
       };
       
-      setResult(extractionResult);
+      setResult(ingredientsResult);
       setSavedToDb(data.savedToDb);
       
-      console.log('[Barcode Test] ✅ Extraction complete:', extractionResult);
+      console.log('[Ingredients Test] ✅ Extraction complete:', ingredientsResult);
       
     } catch (err) {
-      console.error('[Barcode Test] ❌ Error:', err);
+      console.error('[Ingredients Test] ❌ Error:', err);
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
@@ -108,10 +110,10 @@ export default function TestBarcodePage() {
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
           <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            🔍 Barcode Extraction Test
+            🥫 Ingredients Extraction Test
           </h1>
           <p className="text-gray-600 text-sm">
-            Test barcode detection and extraction. Results are saved to products_dev table.
+            Test ingredient list extraction with sub-ingredient preservation. Results are saved to products_dev table.
           </p>
         </div>
 
@@ -120,22 +122,34 @@ export default function TestBarcodePage() {
           <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-4">
             <h2 className="font-bold text-blue-900 mb-2">📋 Instructions</h2>
             <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
-              <li>Click "Scan Barcode" button below</li>
-              <li>Point camera at a product barcode</li>
-              <li>Ensure barcode is clearly visible and well-lit</li>
-              <li>Wait for automatic detection or capture manually</li>
-              <li>Review extraction results</li>
+              <li>Click "Scan Ingredients" button below</li>
+              <li>Point camera at the ingredient list on the product label</li>
+              <li>Ensure the word "Ingredients" and the full list are visible</li>
+              <li>Make sure text is in focus and well-lit</li>
+              <li>Click "Capture" when ready</li>
+              <li>Review extracted ingredients</li>
             </ol>
+            <div className="mt-3 p-3 bg-blue-100 rounded">
+              <p className="text-xs text-blue-900 font-medium mb-2">
+                💡 Tips for best results:
+              </p>
+              <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                <li>Capture the entire ingredient list in one shot</li>
+                <li>Avoid glare and shadows on the label</li>
+                <li>Hold camera steady and parallel to the label</li>
+                <li>Ensure text is not cut off at edges</li>
+              </ul>
+            </div>
           </div>
         )}
 
-        {/* Scan Button */}
+        {/* Capture Button */}
         {!result && !loading && (
           <button
             onClick={() => setShowScanner(true)}
             className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg"
           >
-            📷 Scan Barcode
+            📷 Scan Ingredients
           </button>
         )}
 
@@ -143,7 +157,8 @@ export default function TestBarcodePage() {
         {loading && (
           <div className="bg-white rounded-lg shadow-lg p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Processing barcode...</p>
+            <p className="text-gray-600">Extracting ingredient list...</p>
+            <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
           </div>
         )}
 
@@ -155,6 +170,9 @@ export default function TestBarcodePage() {
               <div className="flex-1">
                 <h3 className="font-bold text-red-900 mb-1">Extraction Failed</h3>
                 <p className="text-red-800 text-sm">{error}</p>
+                <p className="text-xs text-red-700 mt-2">
+                  Make sure the ingredient list is clearly visible and in focus.
+                </p>
               </div>
             </div>
             <button
@@ -170,16 +188,10 @@ export default function TestBarcodePage() {
         {result && (
           <div className="space-y-4">
             {/* Success Banner */}
-            <div className={`rounded-lg p-6 ${
-              result.method === 'Failed' 
-                ? 'bg-red-50 border-2 border-red-300' 
-                : 'bg-green-50 border-2 border-green-300'
-            }`}>
+            <div className="bg-green-50 border-2 border-green-300 rounded-lg p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className={`text-xl font-bold ${
-                  result.method === 'Failed' ? 'text-red-900' : 'text-green-900'
-                }`}>
-                  {result.method === 'Failed' ? '❌ Extraction Failed' : '✅ Barcode Detected'}
+                <h2 className="text-xl font-bold text-green-900">
+                  ✅ Ingredients Extracted
                 </h2>
                 {savedToDb && (
                   <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
@@ -188,28 +200,25 @@ export default function TestBarcodePage() {
                 )}
               </div>
 
-              {/* Barcode Display */}
-              {result.barcode && (
-                <div className="bg-white rounded-lg p-4 mb-4">
-                  <p className="text-sm text-gray-600 mb-1">Barcode Number:</p>
-                  <p className="text-3xl font-mono font-bold text-gray-900">
-                    {result.barcode}
-                  </p>
-                </div>
-              )}
+              {/* Ingredient Count */}
+              <div className="bg-white rounded-lg p-4 mb-4">
+                <p className="text-xs text-gray-600 mb-1">Total Ingredients:</p>
+                <p className="text-3xl font-bold text-gray-900">
+                  {result.ingredientCount}
+                </p>
+              </div>
 
-              {/* Method Badge */}
-              <div className="flex items-center gap-2 mb-4">
-                <span className="text-sm font-medium text-gray-700">Detection Method:</span>
-                <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                  result.method === 'BarcodeDetector' 
-                    ? 'bg-blue-100 text-blue-800'
-                    : result.method === 'OCR'
-                    ? 'bg-purple-100 text-purple-800'
-                    : 'bg-gray-100 text-gray-800'
-                }`}>
-                  {result.method}
-                </span>
+              {/* Ingredients List */}
+              <div className="bg-white rounded-lg p-4 mb-4">
+                <p className="text-xs text-gray-600 mb-3 font-semibold">Ingredient List:</p>
+                <ol className="space-y-2">
+                  {result.ingredients.map((ingredient, index) => (
+                    <li key={index} className="text-sm text-gray-900 flex">
+                      <span className="text-gray-500 mr-2 font-medium">{index + 1}.</span>
+                      <span className="flex-1">{ingredient}</span>
+                    </li>
+                  ))}
+                </ol>
               </div>
 
               {/* Metrics */}
@@ -219,28 +228,57 @@ export default function TestBarcodePage() {
                   <p className="text-lg font-bold text-gray-900">{result.processingTime}ms</p>
                 </div>
                 <div className="bg-white rounded-lg p-3">
+                  <p className="text-xs text-gray-600 mb-1">Confidence</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    {(result.confidence * 100).toFixed(0)}%
+                  </p>
+                </div>
+                <div className="bg-white rounded-lg p-3 col-span-2">
                   <p className="text-xs text-gray-600 mb-1">Image Size</p>
                   <p className="text-lg font-bold text-gray-900">
                     {(result.imageSize / 1024).toFixed(1)}KB
                   </p>
                 </div>
-                {result.confidence !== undefined && (
-                  <div className="bg-white rounded-lg p-3 col-span-2">
-                    <p className="text-xs text-gray-600 mb-1">OCR Confidence</p>
-                    <p className="text-lg font-bold text-gray-900">
-                      {(result.confidence * 100).toFixed(0)}%
-                    </p>
+              </div>
+
+              {/* Quality Indicators */}
+              <div className="bg-white rounded-lg p-4 mb-4">
+                <p className="text-xs text-gray-600 mb-2 font-semibold">Quality Checks:</p>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={result.ingredientCount >= 3 ? 'text-green-600' : 'text-yellow-600'}>
+                      {result.ingredientCount >= 3 ? '✓' : '⚠'}
+                    </span>
+                    <span className="text-sm text-gray-700">
+                      Ingredient count: {result.ingredientCount >= 3 ? 'Good' : 'Low (may be incomplete)'}
+                    </span>
                   </div>
-                )}
+                  <div className="flex items-center gap-2">
+                    <span className={result.confidence >= 0.7 ? 'text-green-600' : 'text-yellow-600'}>
+                      {result.confidence >= 0.7 ? '✓' : '⚠'}
+                    </span>
+                    <span className="text-sm text-gray-700">
+                      Confidence: {result.confidence >= 0.7 ? 'High' : 'Medium (verify accuracy)'}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={result.ingredients.some(i => i.includes('(')) ? 'text-green-600' : 'text-gray-400'}>
+                      {result.ingredients.some(i => i.includes('(')) ? '✓' : '○'}
+                    </span>
+                    <span className="text-sm text-gray-700">
+                      Sub-ingredients: {result.ingredients.some(i => i.includes('(')) ? 'Preserved' : 'None detected'}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               {/* Raw Text (for debugging) */}
               {result.rawText && (
                 <details className="bg-white rounded-lg p-3">
                   <summary className="cursor-pointer text-sm font-medium text-gray-700">
-                    View Raw OCR Text
+                    View Raw Extraction Response
                   </summary>
-                  <pre className="mt-2 text-xs text-gray-600 whitespace-pre-wrap font-mono">
+                  <pre className="mt-2 text-xs text-gray-600 whitespace-pre-wrap font-mono max-h-48 overflow-auto">
                     {result.rawText}
                   </pre>
                 </details>
@@ -253,7 +291,7 @@ export default function TestBarcodePage() {
                 onClick={handleReset}
                 className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
               >
-                Test Another Barcode
+                Test Another Product
               </button>
               <button
                 onClick={() => window.location.href = '/'}
@@ -268,8 +306,8 @@ export default function TestBarcodePage() {
         {/* Scanner Modal */}
         {showScanner && (
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            <BarcodeScanner
-              scanType="barcode"
+            <ImageScanner
+              scanType="ingredients"
               onScanComplete={handleScanComplete}
               onError={(error) => {
                 setError(error);

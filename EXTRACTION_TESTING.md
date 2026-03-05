@@ -51,15 +51,91 @@ CREATE TABLE products_dev (
 );
 ```
 
-### 2. Packaging Extraction Test (Coming Soon)
+### 2. Packaging Extraction Test
 **URL**: `/test-packaging`
 
-**Purpose**: Test product name, brand, size, and category extraction from packaging images.
+**Purpose**: Test product packaging information extraction using Gemini Vision OCR.
 
-### 3. Nutrition Label Extraction Test (Coming Soon)
+**Features**:
+- Extracts product name from packaging
+- Extracts brand name
+- Extracts size/quantity information
+- Infers product category
+- Identifies packaging type (bottle, can, box, bag, jar, carton)
+- Shows confidence scores
+- Shows processing time and image size
+- Saves results to `products_dev` table
+- Shows raw OCR text for debugging
+
+**How to Use**:
+1. Navigate to `/test-packaging`
+2. Click "Capture Packaging"
+3. Point camera at product front label
+4. Ensure product name and brand are clearly visible
+5. Capture the image
+6. Review results showing:
+   - Product name
+   - Brand name
+   - Size/quantity
+   - Category
+   - Packaging type
+   - Confidence score
+   - Processing metrics
+   - Raw extracted text
+
+**Extracted Fields**:
+- **Product Name**: Main product title (e.g., "Organic Whole Milk")
+- **Brand**: Manufacturer or company name (e.g., "Horizon")
+- **Size**: Quantity or volume (e.g., "64 fl oz", "1.89 L", "6 pack")
+- **Category**: Inferred category (e.g., Beverages, Snacks, Dairy)
+- **Packaging Type**: Container type (e.g., bottle, can, box, bag, jar, carton)
+
+### 3. Ingredients Extraction Test
+**URL**: `/test-ingredients`
+
+**Purpose**: Test ingredient list extraction with sub-ingredient preservation using Gemini Vision OCR.
+
+**Features**:
+- Extracts complete ingredient list from product labels
+- Preserves sub-ingredients in parentheses (e.g., "Enriched Flour (wheat flour, niacin)")
+- Ignores marketing text and promotional phrases
+- Detects ingredient list boundaries automatically
+- Shows ingredient count and quality indicators
+- Displays confidence scores
+- Shows processing time and image size
+- Saves results to `products_dev` table
+- Shows raw OCR text for debugging
+
+**How to Use**:
+1. Navigate to `/test-ingredients`
+2. Click "Scan Ingredients"
+3. Point camera at ingredient list on product label
+4. Ensure "Ingredients" heading and full list are visible
+5. Capture the image
+6. Review results showing:
+   - Complete ingredient list (numbered)
+   - Total ingredient count
+   - Sub-ingredient preservation status
+   - Confidence score
+   - Processing metrics
+   - Quality checks
+
+**Extraction Rules**:
+- **Ignore Marketing**: Discards promotional phrases like "Now with less salt!", "Organic!", "Family Size"
+- **Boundary Detection**: Starts at "Ingredients" heading, stops at end of list
+- **Preserve Sub-Ingredients**: Maintains parentheses and nested components
+- **No Hallucination**: Returns empty if no clear ingredient list found
+- **Formatting**: Preserves capitalization, percentages, and "and/or" statements
+
+**Quality Indicators**:
+- ✓ Ingredient count ≥3 (Good) / ⚠ <3 (May be incomplete)
+- ✓ Confidence ≥0.7 (High) / ⚠ <0.7 (Medium - verify accuracy)
+- ✓ Sub-ingredients preserved / ○ None detected
+
+### 4. Nutrition Label Extraction Test (Coming Soon)
 **URL**: `/test-nutrition`
 
-**Purpose**: Test nutrition facts and ingredient list extraction from nutrition labels.
+**Purpose**: Test nutrition facts extraction from nutrition labels.
 
 ## Analyzing Results
 
@@ -73,6 +149,65 @@ FROM products_dev
 WHERE barcode IS NOT NULL
 GROUP BY detection_method
 ORDER BY total DESC;
+```
+
+### Query Packaging Extraction Success Rate
+```sql
+SELECT 
+  COUNT(*) as total_extractions,
+  COUNT(product_name) as has_product_name,
+  COUNT(brand) as has_brand,
+  COUNT(size) as has_size,
+  COUNT(category) as has_category,
+  COUNT(packaging_type) as has_packaging_type,
+  ROUND(AVG(confidence), 2) as avg_confidence
+FROM products_dev
+WHERE product_name IS NOT NULL OR brand IS NOT NULL;
+```
+
+### Query Ingredients Extraction Success Rate
+```sql
+SELECT 
+  COUNT(*) as total_extractions,
+  ROUND(AVG((metadata->>'ingredient_count')::INTEGER), 1) as avg_ingredient_count,
+  ROUND(AVG((metadata->>'confidence')::DECIMAL), 2) as avg_confidence,
+  COUNT(*) FILTER (WHERE (metadata->>'ingredient_count')::INTEGER >= 3) as complete_lists,
+  COUNT(*) FILTER (WHERE (metadata->>'ingredient_count')::INTEGER < 3) as incomplete_lists
+FROM products_dev
+WHERE metadata->>'extraction_type' = 'ingredients';
+```
+
+### View Ingredients with Sub-Components
+```sql
+SELECT 
+  id,
+  metadata->'ingredients' as ingredients,
+  metadata->>'ingredient_count' as count,
+  metadata->>'confidence' as confidence,
+  created_at
+FROM products_dev
+WHERE metadata->>'extraction_type' = 'ingredients'
+  AND metadata->>'raw_ocr_text' LIKE '%(%'
+ORDER BY created_at DESC
+LIMIT 10;
+```
+
+### Find Incomplete Packaging Extractions
+```sql
+SELECT 
+  id,
+  product_name,
+  brand,
+  size,
+  category,
+  packaging_type,
+  confidence,
+  created_at
+FROM products_dev
+WHERE (product_name IS NULL OR brand IS NULL)
+  AND raw_ocr_text IS NOT NULL
+ORDER BY created_at DESC
+LIMIT 10;
 ```
 
 ### Find Failed Extractions
@@ -105,12 +240,49 @@ GROUP BY detection_method;
 ```sql
 SELECT 
   barcode,
+  product_name,
+  brand,
+  size,
+  category,
   detection_method,
   confidence,
   created_at
 FROM products_dev
 ORDER BY created_at DESC
 LIMIT 20;
+```
+
+### Compare Extraction Quality by Field
+```sql
+SELECT 
+  'Product Name' as field,
+  COUNT(*) FILTER (WHERE product_name IS NOT NULL) as extracted,
+  COUNT(*) as total,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE product_name IS NOT NULL) / COUNT(*), 1) as success_rate
+FROM products_dev
+WHERE raw_ocr_text IS NOT NULL
+
+UNION ALL
+
+SELECT 
+  'Brand' as field,
+  COUNT(*) FILTER (WHERE brand IS NOT NULL) as extracted,
+  COUNT(*) as total,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE brand IS NOT NULL) / COUNT(*), 1) as success_rate
+FROM products_dev
+WHERE raw_ocr_text IS NOT NULL
+
+UNION ALL
+
+SELECT 
+  'Size' as field,
+  COUNT(*) FILTER (WHERE size IS NOT NULL) as extracted,
+  COUNT(*) as total,
+  ROUND(100.0 * COUNT(*) FILTER (WHERE size IS NOT NULL) / COUNT(*), 1) as success_rate
+FROM products_dev
+WHERE raw_ocr_text IS NOT NULL
+
+ORDER BY success_rate DESC;
 ```
 
 ## Benefits of This Approach
