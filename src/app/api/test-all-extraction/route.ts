@@ -3,19 +3,20 @@
  * 
  * POST /api/test-all-extraction
  * 
- * Orchestrates all extraction types sequentially:
+ * Extracts all product information in a SINGLE API call using combined prompts:
  * 1. Barcode detection
  * 2. Packaging information
  * 3. Ingredients list
  * 4. Nutrition facts
  * 
- * Uses Vertex AI with automatic retry logic (no manual delays needed).
+ * Uses Vertex AI with automatic retry logic.
  * Saves complete product to products_dev table.
  */
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
+import { combineExtractionPrompts } from '@/lib/prompts/extraction-prompts';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    console.log('[Test All API] 📥 Starting complete extraction');
+    console.log('[Test All API] 📥 Starting complete extraction (single API call)');
 
     // Strip data URL prefix if present
     let base64Data = image;
@@ -96,46 +97,75 @@ export async function POST(request: NextRequest) {
       ingredients: null,
       nutrition_facts: null,
       metadata: {
-        extraction_type: 'complete',
+        extraction_type: 'combined_single_call',
         extraction_steps: {},
       },
     };
 
-    // STEP 1: Barcode Detection
+    // COMBINED EXTRACTION: All data in a single API call
     try {
-      console.log('[Test All API] 🔍 Step 1: Barcode detection');
-      steps.barcode.status = 'processing';
-      const barcodeStart = Date.now();
+      console.log('[Test All API] 🔍 Extracting all data with combined prompt');
+      const extractionStart = Date.now();
 
-      const barcodePrompt = `Extract the barcode number from this image.
+      // Combine all extraction prompts into one
+      const combinedPrompt = combineExtractionPrompts([
+        'barcode',
+        'packaging',
+        'ingredients',
+        'nutrition',
+      ]);
 
-INSTRUCTIONS:
-1. Look for a barcode (UPC, EAN, or similar)
-2. Extract ONLY the numeric digits below or near the barcode
-3. Return ONLY the barcode number, nothing else
-4. If you cannot find a barcode, return "NONE"
-
-Return format: Just the barcode number (e.g., "012345678901")`;
-
-      const barcodeResult = await gemini.generateContent({
-        prompt: barcodePrompt,
+      const result = await gemini.generateContent({
+        prompt: combinedPrompt,
         imageData: base64Data,
         imageMimeType: 'image/jpeg',
         maxRetries: 2,
         retryDelayMs: 5000,
       });
 
-      if (!barcodeResult.success) {
-        steps.barcode.status = 'failed';
-        steps.barcode.error = barcodeResult.error;
-        if (barcodeResult.rateLimitInfo) {
-          console.error('[Test All API] 🚨 Rate limit details:', barcodeResult.rateLimitInfo);
+      if (!result.success) {
+        console.error('[Test All API] ❌ Combined extraction failed:', result.error);
+        if (result.rateLimitInfo) {
+          console.error('[Test All API] 🚨 Rate limit details:', result.rateLimitInfo);
         }
-        productData.metadata.extraction_steps.barcode = steps.barcode;
-      } else {
-        const barcodeText = barcodeResult.text!.trim();
-        const barcodeMatch = barcodeText.match(/\b\d{8,14}\b/);
 
+        // Mark all steps as failed
+        steps.barcode.status = 'failed';
+        steps.barcode.error = result.error;
+        steps.packaging.status = 'failed';
+        steps.packaging.error = result.error;
+        steps.ingredients.status = 'failed';
+        steps.ingredients.error = result.error;
+        steps.nutrition.status = 'failed';
+        steps.nutrition.error = result.error;
+
+        const totalProcessingTime = Date.now() - startTime;
+        return NextResponse.json(
+          {
+            success: false,
+            steps,
+            error: result.error,
+            savedToDb: false,
+            totalProcessingTime,
+          },
+          { status: 500 }
+        );
+      }
+
+      // Parse combined response
+      let responseText = result.text!.trim();
+      if (responseText.includes('```json')) {
+        responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+      }
+
+      const extractedData = JSON.parse(responseText);
+      const extractionTime = Date.now() - extractionStart;
+
+      console.log('[Test All API] ✅ Combined extraction completed in', extractionTime, 'ms');
+
+      // Process barcode
+      if (extractedData.barcode) {
+        const barcodeMatch = extractedData.barcode.match(/\b\d{8,14}\b/);
         if (barcodeMatch) {
           productData.barcode = barcodeMatch[0];
           steps.barcode.status = 'success';
@@ -144,315 +174,98 @@ Return format: Just the barcode number (e.g., "012345678901")`;
           console.log('[Test All API] ✅ Barcode found:', barcodeMatch[0]);
         } else {
           steps.barcode.status = 'failed';
-          steps.barcode.error = 'No barcode detected';
-          console.log('[Test All API] ⚠️ No barcode found');
+          steps.barcode.error = 'No valid barcode detected';
         }
-
-        steps.barcode.processingTime = Date.now() - barcodeStart;
-        productData.metadata.extraction_steps.barcode = steps.barcode;
-      }
-
-    } catch (error) {
-      steps.barcode.status = 'failed';
-      steps.barcode.error = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Test All API] ❌ Barcode extraction failed:', error);
-      productData.metadata.extraction_steps.barcode = steps.barcode;
-    }
-
-    // STEP 2: Packaging Information
-    try {
-      console.log('[Test All API] 📦 Step 2: Packaging information');
-      steps.packaging.status = 'processing';
-      const packagingStart = Date.now();
-
-      const packagingPrompt = `Extract product packaging information from this image.
-
-INSTRUCTIONS:
-1. Identify the PRODUCT NAME (the main product title)
-2. Identify the BRAND (manufacturer or company name)
-3. Identify the SIZE/QUANTITY (e.g., "12 oz", "500g", "6 pack")
-4. Identify the CATEGORY (e.g., Beverages, Snacks, Dairy, Bakery, etc.)
-5. Identify the PACKAGING TYPE (e.g., bottle, can, box, bag, jar, carton)
-
-Return ONLY a JSON object with these fields:
-{
-  "productName": "extracted product name",
-  "brand": "extracted brand name",
-  "size": "extracted size/quantity",
-  "category": "inferred category",
-  "packagingType": "type of packaging",
-  "confidence": 0.0-1.0
-}
-
-RULES:
-- Extract text exactly as it appears
-- If a field cannot be determined, use null
-- Return ONLY the JSON object, no additional text`;
-
-      const packagingResult = await gemini.generateContent({
-        prompt: packagingPrompt,
-        imageData: base64Data,
-        imageMimeType: 'image/jpeg',
-        maxRetries: 2,
-        retryDelayMs: 5000,
-      });
-
-      if (!packagingResult.success) {
-        steps.packaging.status = 'failed';
-        steps.packaging.error = packagingResult.error;
-        if (packagingResult.rateLimitInfo) {
-          console.error('[Test All API] 🚨 Rate limit details:', packagingResult.rateLimitInfo);
-        }
-        steps.packaging.processingTime = Date.now() - packagingStart;
-        productData.metadata.extraction_steps.packaging = steps.packaging;
       } else {
-        let packagingText = packagingResult.text!.trim();
-        if (packagingText.includes('```json')) {
-          packagingText = packagingText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-        }
+        steps.barcode.status = 'failed';
+        steps.barcode.error = 'No barcode in response';
+      }
+      steps.barcode.processingTime = extractionTime;
+      productData.metadata.extraction_steps.barcode = steps.barcode;
 
-        const packagingData = JSON.parse(packagingText);
-        
-        productData.name = packagingData.productName || null;
-        productData.brand = packagingData.brand || null;
-        productData.size = packagingData.size || null;
-        productData.category = packagingData.category || null;
-        productData.metadata.packaging_type = packagingData.packagingType || null;
+      // Process packaging
+      if (extractedData.packaging) {
+        productData.name = extractedData.packaging.productName || null;
+        productData.brand = extractedData.packaging.brand || null;
+        productData.size = extractedData.packaging.size || null;
+        productData.category = extractedData.packaging.category || null;
+        productData.metadata.packaging_type = extractedData.packaging.packagingType || null;
 
         steps.packaging.status = 'success';
-        steps.packaging.data = packagingData;
-        steps.packaging.confidence = packagingData.confidence || 0.5;
+        steps.packaging.data = extractedData.packaging;
+        steps.packaging.confidence = extractedData.packaging.confidence || 0.5;
         console.log('[Test All API] ✅ Packaging extracted');
-
-        steps.packaging.processingTime = Date.now() - packagingStart;
-        productData.metadata.extraction_steps.packaging = steps.packaging;
-      }
-
-    } catch (error) {
-      steps.packaging.status = 'failed';
-      steps.packaging.error = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Test All API] ❌ Packaging extraction failed:', error);
-      productData.metadata.extraction_steps.packaging = steps.packaging;
-    }
-
-    // STEP 3: Ingredients List
-    try {
-      console.log('[Test All API] 🥫 Step 3: Ingredients list');
-      steps.ingredients.status = 'processing';
-      const ingredientsStart = Date.now();
-
-      const ingredientsPrompt = `Extract the ingredient list from this product label image.
-
-CRITICAL RULES:
-1. IGNORE MARKETING TEXT: Discard promotional phrases
-2. BOUNDARY DETECTION: 
-   - START at "Ingredients" or "INGREDIENTS:"
-   - STOP at "Contains:" or "CONTAINS:" (allergen statement)
-   - STOP at any change in font/layout
-   - Do NOT include anything after "Contains:"
-3. PRESERVE SUB-INGREDIENTS: Keep parenthetical components
-4. NO HALLUCINATION: If no clear list, return "NONE"
-5. SPLIT ON COMMAS: 
-   - Split ingredients by COMMAS, not line breaks
-   - Ignore line breaks in the OCR text
-   - Each comma-separated item is one ingredient
-   - Keep sub-ingredients in parentheses together
-6. EXCLUDE ALLERGENS: Do NOT include "Contains:" or "CONTAINS:" statements
-
-Return ONLY a JSON object:
-{
-  "ingredients": [
-    "Ingredient 1",
-    "Ingredient 2 (with sub-ingredients)",
-    "Ingredient 3",
-    ...
-  ],
-  "confidence": 0.0-1.0,
-  "notes": "any notes"
-}
-
-IMPORTANT:
-- Split ONLY on commas, NOT on line breaks
-- Each ingredient must be a SEPARATE array element
-- Do NOT include the word "INGREDIENTS:" or "Ingredients:" in any array element
-- Remove "INGREDIENTS:" prefix from the first ingredient
-- STOP extraction when you see "CONTAINS:" or "Contains:"
-- Do NOT include allergen statements
-- Preserve capitalization and sub-ingredients in parentheses
-- If an ingredient spans multiple lines, join it into one array element
-
-EXAMPLE:
-Input: "INGREDIENTS: Water, Sugar, Salt. CONTAINS: SOY"
-Output: {
-  "ingredients": ["Water", "Sugar", "Salt"],
-  "confidence": 0.95,
-  "notes": "Clear ingredient list, stopped at allergen statement"
-}
-
-EXAMPLE 2:
-Input: "INGREDIENTS: Flour (Wheat, Niacin), Oil, Sugar CONTAINS: WHEAT"
-Output: {
-  "ingredients": ["Flour (Wheat, Niacin)", "Oil", "Sugar"],
-  "confidence": 0.9,
-  "notes": "Stopped at CONTAINS statement"
-}
-
-EXAMPLE 3 (Multi-line OCR):
-Input: "INGREDIENTS: Whole Grain Blend (Rolled
-Oats, Wheat), Sugar, Salt CONTAINS: WHEAT"
-Output: {
-  "ingredients": ["Whole Grain Blend (Rolled Oats, Wheat)", "Sugar", "Salt"],
-  "confidence": 0.9,
-  "notes": "Joined multi-line ingredients, stopped at CONTAINS"
-}`;
-
-      const ingredientsResult = await gemini.generateContent({
-        prompt: ingredientsPrompt,
-        imageData: base64Data,
-        imageMimeType: 'image/jpeg',
-        maxRetries: 2,
-        retryDelayMs: 5000,
-      });
-
-      if (!ingredientsResult.success) {
-        steps.ingredients.status = 'failed';
-        steps.ingredients.error = ingredientsResult.error;
-        if (ingredientsResult.rateLimitInfo) {
-          console.error('[Test All API] 🚨 Rate limit details:', ingredientsResult.rateLimitInfo);
-        }
-        steps.ingredients.processingTime = Date.now() - ingredientsStart;
-        productData.metadata.extraction_steps.ingredients = steps.ingredients;
       } else {
-        let ingredientsText = ingredientsResult.text!.trim();
-        if (ingredientsText.includes('```json')) {
-          ingredientsText = ingredientsText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-        }
+        steps.packaging.status = 'failed';
+        steps.packaging.error = 'No packaging data in response';
+      }
+      steps.packaging.processingTime = extractionTime;
+      productData.metadata.extraction_steps.packaging = steps.packaging;
 
-        const ingredientsData = JSON.parse(ingredientsText);
-        
+      // Process ingredients
+      if (extractedData.ingredients?.ingredients && extractedData.ingredients.ingredients.length > 0) {
         // Post-processing: Remove "INGREDIENTS:" prefix from first ingredient if present
-        if (ingredientsData.ingredients && ingredientsData.ingredients.length > 0) {
-          ingredientsData.ingredients[0] = ingredientsData.ingredients[0]
+        const ingredients = [...extractedData.ingredients.ingredients];
+        if (ingredients[0]) {
+          ingredients[0] = ingredients[0]
             .replace(/^INGREDIENTS:\s*/i, '')
             .replace(/^Ingredients:\s*/i, '')
             .trim();
         }
-        
-        if (ingredientsData.ingredients && ingredientsData.ingredients.length > 0) {
-          productData.ingredients = ingredientsData.ingredients;
-          steps.ingredients.status = 'success';
-          steps.ingredients.data = ingredientsData;
-          steps.ingredients.confidence = ingredientsData.confidence || 0.5;
-          console.log('[Test All API] ✅ Ingredients extracted:', ingredientsData.ingredients.length);
-        } else {
-          steps.ingredients.status = 'failed';
-          steps.ingredients.error = 'No ingredients found';
-          console.log('[Test All API] ⚠️ No ingredients found');
-        }
 
-        steps.ingredients.processingTime = Date.now() - ingredientsStart;
-        productData.metadata.extraction_steps.ingredients = steps.ingredients;
-      }
-
-    } catch (error) {
-      steps.ingredients.status = 'failed';
-      steps.ingredients.error = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Test All API] ❌ Ingredients extraction failed:', error);
-      productData.metadata.extraction_steps.ingredients = steps.ingredients;
-    }
-
-    // STEP 4: Nutrition Facts
-    try {
-      console.log('[Test All API] 📊 Step 4: Nutrition facts');
-      steps.nutrition.status = 'processing';
-      const nutritionStart = Date.now();
-
-      const nutritionPrompt = `Extract nutrition facts from this Nutrition Facts label.
-
-CRITICAL RULES:
-1. TABLE INTEGRITY: Only extract from official Nutrition Facts table
-2. DISCARD MARKETING: Ignore promotional callouts
-3. UNIT MAPPING: Always include units (g, mg, mcg)
-4. DAILY VALUE: Extract %DV when present
-5. SERVING SIZE: Always capture serving size and servings per container
-
-Return ONLY a JSON object with this EXACT structure:
-{
-  "serving_size": "string with units",
-  "servings_per_container": number,
-  "calories_per_serving": number,
-  "macros": {
-    "total_fat": {"value": number, "unit": "g", "dv_percent": number or null},
-    "saturated_fat": {"value": number, "unit": "g", "dv_percent": number or null},
-    "trans_fat": {"value": number, "unit": "g"},
-    "cholesterol": {"value": number, "unit": "mg", "dv_percent": number or null},
-    "sodium": {"value": number, "unit": "mg", "dv_percent": number or null},
-    "total_carbohydrate": {"value": number, "unit": "g", "dv_percent": number or null},
-    "dietary_fiber": {"value": number, "unit": "g", "dv_percent": number or null},
-    "total_sugars": {"value": number, "unit": "g"},
-    "added_sugars": {"value": number, "unit": "g", "dv_percent": number or null},
-    "protein": {"value": number, "unit": "g", "dv_percent": number or null}
-  },
-  "vitamins_minerals": {
-    "vitamin_d": {"value": number, "unit": "mcg", "dv_percent": number or null},
-    "calcium": {"value": number, "unit": "mg", "dv_percent": number or null},
-    "iron": {"value": number, "unit": "mg", "dv_percent": number or null},
-    "potassium": {"value": number, "unit": "mg", "dv_percent": number or null}
-  },
-  "confidence": 0.0-1.0
-}
-
-IMPORTANT:
-- value must be a NUMBER (not string)
-- unit must be separate (g, mg, mcg)
-- dv_percent must be a NUMBER (not string with %)
-- If not present, use null`;
-
-      const nutritionResult = await gemini.generateContent({
-        prompt: nutritionPrompt,
-        imageData: base64Data,
-        imageMimeType: 'image/jpeg',
-        maxRetries: 2,
-        retryDelayMs: 5000,
-      });
-
-      if (!nutritionResult.success) {
-        steps.nutrition.status = 'failed';
-        steps.nutrition.error = nutritionResult.error;
-        if (nutritionResult.rateLimitInfo) {
-          console.error('[Test All API] 🚨 Rate limit details:', nutritionResult.rateLimitInfo);
-        }
-        steps.nutrition.processingTime = Date.now() - nutritionStart;
-        productData.metadata.extraction_steps.nutrition = steps.nutrition;
+        productData.ingredients = ingredients;
+        steps.ingredients.status = 'success';
+        steps.ingredients.data = extractedData.ingredients;
+        steps.ingredients.confidence = extractedData.ingredients.confidence || 0.5;
+        console.log('[Test All API] ✅ Ingredients extracted:', ingredients.length);
       } else {
-        let nutritionText = nutritionResult.text!.trim();
-        if (nutritionText.includes('```json')) {
-          nutritionText = nutritionText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-        }
+        steps.ingredients.status = 'failed';
+        steps.ingredients.error = 'No ingredients found';
+        console.log('[Test All API] ⚠️ No ingredients found');
+      }
+      steps.ingredients.processingTime = extractionTime;
+      productData.metadata.extraction_steps.ingredients = steps.ingredients;
 
-        const nutritionData = JSON.parse(nutritionText);
-        
-        if (nutritionData.serving_size && nutritionData.macros) {
-          productData.nutrition_facts = nutritionData;
-          steps.nutrition.status = 'success';
-          steps.nutrition.data = nutritionData;
-          steps.nutrition.confidence = nutritionData.confidence || 0.5;
-          console.log('[Test All API] ✅ Nutrition facts extracted');
-        } else {
-          steps.nutrition.status = 'failed';
-          steps.nutrition.error = 'Incomplete nutrition facts';
-          console.log('[Test All API] ⚠️ Incomplete nutrition facts');
-        }
+      // Process nutrition facts
+      if (extractedData.nutrition_facts?.serving_size && extractedData.nutrition_facts.macros) {
+        productData.nutrition_facts = extractedData.nutrition_facts;
+        steps.nutrition.status = 'success';
+        steps.nutrition.data = extractedData.nutrition_facts;
+        steps.nutrition.confidence = extractedData.nutrition_facts.confidence || 0.5;
+        console.log('[Test All API] ✅ Nutrition facts extracted');
+      } else {
+        steps.nutrition.status = 'failed';
+        steps.nutrition.error = 'Incomplete nutrition facts';
+        console.log('[Test All API] ⚠️ Incomplete nutrition facts');
+      }
+      steps.nutrition.processingTime = extractionTime;
+      productData.metadata.extraction_steps.nutrition = steps.nutrition;
 
-        steps.nutrition.processingTime = Date.now() - nutritionStart;
-        productData.metadata.extraction_steps.nutrition = steps.nutrition;
+      // Store overall confidence
+      if (extractedData.overall_confidence) {
+        productData.metadata.overall_confidence = extractedData.overall_confidence;
       }
 
     } catch (error) {
+      console.error('[Test All API] ❌ Combined extraction error:', error);
+      
+      // Mark all steps as failed
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      steps.barcode.status = 'failed';
+      steps.barcode.error = errorMessage;
+      steps.packaging.status = 'failed';
+      steps.packaging.error = errorMessage;
+      steps.ingredients.status = 'failed';
+      steps.ingredients.error = errorMessage;
       steps.nutrition.status = 'failed';
-      steps.nutrition.error = error instanceof Error ? error.message : 'Unknown error';
-      console.error('[Test All API] ❌ Nutrition extraction failed:', error);
-      productData.metadata.extraction_steps.nutrition = steps.nutrition;
+      steps.nutrition.error = errorMessage;
+
+      productData.metadata.extraction_steps = {
+        barcode: steps.barcode,
+        packaging: steps.packaging,
+        ingredients: steps.ingredients,
+        nutrition: steps.nutrition,
+      };
     }
 
     // Save to database

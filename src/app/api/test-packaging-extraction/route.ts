@@ -11,6 +11,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
+import { ExtractionPrompts } from '@/lib/prompts/extraction-prompts';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -55,35 +56,9 @@ export async function POST(request: NextRequest) {
     if (image.includes('base64,')) {
       base64Data = image.split('base64,')[1];
     }
-    
-    const prompt = `Extract product packaging information from this image.
-
-INSTRUCTIONS:
-1. Identify the PRODUCT NAME (the main product title)
-2. Identify the BRAND (manufacturer or company name)
-3. Identify the SIZE/QUANTITY (e.g., "12 oz", "500g", "6 pack")
-4. Identify the CATEGORY (e.g., Beverages, Snacks, Dairy, Bakery, etc.)
-5. Identify the PACKAGING TYPE (e.g., bottle, can, box, bag, jar, carton)
-
-Return ONLY a JSON object with these fields:
-{
-  "productName": "extracted product name",
-  "brand": "extracted brand name",
-  "size": "extracted size/quantity",
-  "category": "inferred category",
-  "packagingType": "type of packaging",
-  "confidence": 0.0-1.0
-}
-
-RULES:
-- Extract text exactly as it appears
-- Do not include label prefixes like "Product Name:" or "Brand:"
-- If a field cannot be determined, use null
-- Confidence should reflect overall extraction quality
-- Return ONLY the JSON object, no additional text`;
 
     const result = await gemini.generateContent({
-      prompt,
+      prompt: ExtractionPrompts.packaging,
       imageData: base64Data,
       imageMimeType: 'image/jpeg',
       maxRetries: 2,

@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
+import { ExtractionPrompts } from '@/lib/prompts/extraction-prompts';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -68,19 +69,9 @@ export async function POST(request: NextRequest) {
       if (image.includes('base64,')) {
         base64Data = image.split('base64,')[1];
       }
-      
-      const prompt = `Extract the barcode number from this image.
-
-INSTRUCTIONS:
-1. Look for a barcode (UPC, EAN, or similar)
-2. Extract ONLY the numeric digits below or near the barcode
-3. Return ONLY the barcode number, nothing else
-4. If you cannot find a barcode, return "NONE"
-
-Return format: Just the barcode number (e.g., "012345678901")`;
 
       const result = await gemini.generateContent({
-        prompt,
+        prompt: ExtractionPrompts.barcode,
         imageData: base64Data,
         imageMimeType: 'image/jpeg',
         maxRetries: 2,
