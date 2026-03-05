@@ -10,15 +10,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GEMINI_MODEL } from '@/lib/config/gemini';
+import { getGeminiWrapper } from '@/lib/gemini-wrapper';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
 
 interface NutritionExtractionRequest {
   image: string; // base64 image data
@@ -47,8 +44,7 @@ export async function POST(request: NextRequest) {
 
     console.log('[Test Nutrition API] 📥 Request received');
 
-    // Extract nutrition facts using Gemini Vision with specialized prompt
-    const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
+    const gemini = getGeminiWrapper();
     
     // Strip data URL prefix if present
     let base64Data = image;
@@ -158,18 +154,27 @@ IMPORTANT:
 - If you cannot find a clear Nutrition Facts table, return confidence: 0.0
 - Do not guess or hallucinate values`;
 
-    const result = await model.generateContent([
+    const result = await gemini.generateContent({
       prompt,
-      {
-        inlineData: {
-          data: base64Data,
-          mimeType: 'image/jpeg',
-        },
-      },
-    ]);
+      imageData: base64Data,
+      imageMimeType: 'image/jpeg',
+      maxRetries: 2,
+      retryDelayMs: 5000,
+    });
 
-    const response = await result.response;
-    const rawText = response.text().trim();
+    if (!result.success) {
+      return NextResponse.json(
+        { 
+          success: false, 
+          error: result.error,
+          confidence: 0, 
+          savedToDb: false 
+        },
+        { status: 500 }
+      );
+    }
+
+    const rawText = result.text!.trim();
     
     console.log('[Test Nutrition API] Raw response:', rawText);
 

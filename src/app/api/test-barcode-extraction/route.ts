@@ -9,15 +9,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { GEMINI_MODEL } from '@/lib/config/gemini';
+import { getGeminiWrapper } from '@/lib/gemini-wrapper';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-const genAI = new GoogleGenerativeAI(process.env.GOOGLE_GENERATIVE_AI_API_KEY!);
 
 interface BarcodeExtractionRequest {
   image: string; // base64 image data
@@ -61,19 +58,18 @@ export async function POST(request: NextRequest) {
       confidence = 1.0;
       console.log('[Test Barcode API] ✅ Using BarcodeDetector result:', barcode);
     } else {
-      // Method 2: OCR Fallback using Gemini Vision
+      // Method 2: OCR Fallback using Gemini Wrapper (Vertex AI)
       console.log('[Test Barcode API] 🔄 Attempting OCR extraction...');
       
-      try {
-        const model = genAI.getGenerativeModel({ model: GEMINI_MODEL });
-        
-        // Strip data URL prefix if present
-        let base64Data = image;
-        if (image.includes('base64,')) {
-          base64Data = image.split('base64,')[1];
-        }
-        
-        const prompt = `Extract the barcode number from this image.
+      const gemini = getGeminiWrapper();
+      
+      // Strip data URL prefix if present
+      let base64Data = image;
+      if (image.includes('base64,')) {
+        base64Data = image.split('base64,')[1];
+      }
+      
+      const prompt = `Extract the barcode number from this image.
 
 INSTRUCTIONS:
 1. Look for a barcode (UPC, EAN, or similar)
@@ -83,19 +79,16 @@ INSTRUCTIONS:
 
 Return format: Just the barcode number (e.g., "012345678901")`;
 
-        const result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: base64Data,
-              mimeType: 'image/jpeg',
-            },
-          },
-        ]);
+      const result = await gemini.generateContent({
+        prompt,
+        imageData: base64Data,
+        imageMimeType: 'image/jpeg',
+        maxRetries: 2,
+        retryDelayMs: 5000,
+      });
 
-        const response = await result.response;
-        rawText = response.text().trim();
-        
+      if (result.success && result.text) {
+        rawText = result.text.trim();
         console.log('[Test Barcode API] OCR raw response:', rawText);
 
         // Extract barcode pattern from response
@@ -112,9 +105,9 @@ Return format: Just the barcode number (e.g., "012345678901")`;
             console.log('[Test Barcode API] ⚠️  No barcode pattern found in OCR response');
           }
         }
-      } catch (ocrError) {
-        console.error('[Test Barcode API] ❌ OCR extraction failed:', ocrError);
-        rawText = `OCR Error: ${ocrError instanceof Error ? ocrError.message : 'Unknown error'}`;
+      } else {
+        console.error('[Test Barcode API] ❌ OCR extraction failed:', result.error);
+        rawText = `OCR Error: ${result.error}`;
       }
     }
 

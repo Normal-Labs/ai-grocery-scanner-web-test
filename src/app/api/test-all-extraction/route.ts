@@ -9,7 +9,7 @@
  * 3. Ingredients list
  * 4. Nutrition facts
  * 
- * Includes rate limiting delays to avoid 429 errors.
+ * Uses Vertex AI with automatic retry logic (no manual delays needed).
  * Saves complete product to products_dev table.
  */
 
@@ -21,10 +21,6 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
-
-// Rate limiting delay between API calls (in milliseconds)
-const RATE_LIMIT_DELAY = 5000; // 5 seconds - conservative to avoid 429 errors
-const INITIAL_DELAY = 1000; // 1 second initial delay before first API call
 
 interface AllExtractionRequest {
   image: string; // base64 image data
@@ -52,9 +48,6 @@ interface AllExtractionResponse {
   totalProcessingTime: number;
   error?: string;
 }
-
-// Helper function to add delay
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export async function POST(request: NextRequest) {
   const startTime = Date.now();
@@ -108,9 +101,6 @@ export async function POST(request: NextRequest) {
       },
     };
 
-    // Initial delay to avoid immediate rate limiting
-    await delay(INITIAL_DELAY);
-
     // STEP 1: Barcode Detection
     try {
       console.log('[Test All API] 🔍 Step 1: Barcode detection');
@@ -142,7 +132,6 @@ Return format: Just the barcode number (e.g., "012345678901")`;
           console.error('[Test All API] 🚨 Rate limit details:', barcodeResult.rateLimitInfo);
         }
         productData.metadata.extraction_steps.barcode = steps.barcode;
-        await delay(RATE_LIMIT_DELAY);
       } else {
         const barcodeText = barcodeResult.text!.trim();
         const barcodeMatch = barcodeText.match(/\b\d{8,14}\b/);
@@ -161,9 +150,6 @@ Return format: Just the barcode number (e.g., "012345678901")`;
 
         steps.barcode.processingTime = Date.now() - barcodeStart;
         productData.metadata.extraction_steps.barcode = steps.barcode;
-
-        // Rate limiting delay
-        await delay(RATE_LIMIT_DELAY);
       }
 
     } catch (error) {
@@ -219,7 +205,6 @@ RULES:
         }
         steps.packaging.processingTime = Date.now() - packagingStart;
         productData.metadata.extraction_steps.packaging = steps.packaging;
-        await delay(RATE_LIMIT_DELAY);
       } else {
         let packagingText = packagingResult.text!.trim();
         if (packagingText.includes('```json')) {
@@ -241,9 +226,6 @@ RULES:
 
         steps.packaging.processingTime = Date.now() - packagingStart;
         productData.metadata.extraction_steps.packaging = steps.packaging;
-
-        // Rate limiting delay
-        await delay(RATE_LIMIT_DELAY);
       }
 
     } catch (error) {
@@ -340,7 +322,6 @@ Output: {
         }
         steps.ingredients.processingTime = Date.now() - ingredientsStart;
         productData.metadata.extraction_steps.ingredients = steps.ingredients;
-        await delay(RATE_LIMIT_DELAY);
       } else {
         let ingredientsText = ingredientsResult.text!.trim();
         if (ingredientsText.includes('```json')) {
@@ -371,9 +352,6 @@ Output: {
 
         steps.ingredients.processingTime = Date.now() - ingredientsStart;
         productData.metadata.extraction_steps.ingredients = steps.ingredients;
-
-        // Rate limiting delay
-        await delay(RATE_LIMIT_DELAY);
       }
 
     } catch (error) {
