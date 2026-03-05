@@ -27,7 +27,7 @@ interface RateLimitInfo {
   quotaLocation?: string;
   retryAfter?: string;
   remainingQuota?: string;
-  tierDetected?: 'Free' | 'Paid' | 'Unknown';
+  tierDetected?: 'Free' | 'Paid' | 'Unknown' | 'Free (assumed)';
   violationDetails?: string[];
 }
 
@@ -246,7 +246,7 @@ export class GeminiWrapper {
         if (headers['x-goog-ratelimit-limit']) {
           validation.quotaLimit = headers['x-goog-ratelimit-limit'];
           
-          const limit = parseInt(validation.quotaLimit);
+          const limit = parseInt(validation.quotaLimit || '0', 10);
           if (limit === 15) {
             validation.tierDetected = 'Free';
           } else if (limit >= 360) {
@@ -266,7 +266,7 @@ export class GeminiWrapper {
         if (headers['x-goog-ratelimit-limit']) {
           validation.quotaLimit = headers['x-goog-ratelimit-limit'];
           
-          const limit = parseInt(validation.quotaLimit);
+          const limit = parseInt(validation.quotaLimit || '0', 10);
           if (limit === 15) {
             validation.tierDetected = 'Free';
           } else if (limit >= 360) {
@@ -287,7 +287,7 @@ export class GeminiWrapper {
             if (obj.headers['x-goog-ratelimit-limit']) {
               validation.quotaLimit = obj.headers['x-goog-ratelimit-limit'];
               
-              const limit = parseInt(validation.quotaLimit);
+              const limit = parseInt(validation.quotaLimit || '0', 10);
               if (limit === 15) {
                 validation.tierDetected = 'Free';
               } else if (limit >= 360) {

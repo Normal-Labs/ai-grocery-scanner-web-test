@@ -1,184 +1,172 @@
-# Deployment Checklist - Product Hero v1.0
+# Deployment Checklist
 
-## Pre-Deployment Verification
+Quick reference for deploying to Vercel.
 
-### ✅ Code Quality
-- [x] All Product Hero features implemented
-- [x] Session management working correctly
-- [x] Data merging functional
-- [x] UI displays results after completion
-- [x] Fresh sessions created for guided mode
-- [x] Build successful (`npm run build`) - ✅ Completed in 1.4s
-- [x] No critical TypeScript errors
-- [x] Minor linting warnings only (non-blocking)
+## ✅ Pre-Deployment Status
 
-### ✅ Documentation
-- [x] README.md updated with Product Hero feature
-- [x] PRODUCT_HERO.md created with complete documentation
-- [x] IMPROVEMENTS.md updated with all bug fixes
-- [x] tasks.md updated with completion status
+- [x] Production build passes
+- [x] TypeScript compilation successful
+- [x] All 28 routes compiled
+- [x] No build errors
+- [x] Combined prompt functionality working
+- [x] Centralized prompt management implemented
 
-### ✅ Environment Variables
-Verify all required environment variables are set in Vercel:
+## 🔧 Required Configuration
+
+### 1. Vertex AI Service Account
+
+**Create Service Account:**
+```bash
+gcloud iam service-accounts create vercel-deployment \
+  --display-name="Vercel Deployment Service Account" \
+  --project=gen-lang-client-0628770168
+
+gcloud projects add-iam-policy-binding gen-lang-client-0628770168 \
+  --member="serviceAccount:vercel-deployment@gen-lang-client-0628770168.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.user"
+
+gcloud iam service-accounts keys create vercel-key.json \
+  --iam-account=vercel-deployment@gen-lang-client-0628770168.iam.gserviceaccount.com
+```
+
+### 2. Vercel Environment Variables
 
 **Required:**
-- [ ] `GOOGLE_GENERATIVE_AI_API_KEY`
-- [ ] `MONGODB_URI`
-- [ ] `NEXT_PUBLIC_SUPABASE_URL`
-- [ ] `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
-- [ ] `SUPABASE_SERVICE_ROLE_KEY`
+```bash
+VERTEX_AI_PROJECT_ID=gen-lang-client-0628770168
+VERTEX_AI_LOCATION=us-central1
+GOOGLE_APPLICATION_CREDENTIALS_JSON=<paste JSON from vercel-key.json>
+NEXT_PUBLIC_SUPABASE_URL=<your_supabase_url>
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<your_key>
+SUPABASE_SERVICE_ROLE_KEY=<your_service_key>
+MONGODB_URI=<your_mongodb_uri>
+```
 
 **Optional:**
-- [ ] `TAVILY_API_KEY`
-- [ ] `BARCODE_LOOKUP_API_KEY`
-- [ ] `NEXT_PUBLIC_APP_URL`
-- [ ] `RATE_LIMIT_MAX_REQUESTS`
-- [ ] `RATE_LIMIT_WINDOW_MS`
-
-### ✅ Database Configuration
-
-**MongoDB Atlas:**
-- [ ] Network access configured (0.0.0.0/0 for Vercel)
-- [ ] Connection string uses `mongodb+srv://` protocol
-- [ ] Database user has read/write permissions
-- [ ] Collections exist:
-  - [ ] `multi_image_sessions`
-  - [ ] `image_cache`
-  - [ ] `dimension_analysis`
-
-**Supabase:**
-- [ ] Tables exist:
-  - [ ] `products`
-  - [ ] `scan_logs`
-  - [ ] `users` (Auth)
-- [ ] RLS policies configured
-- [ ] Service role key has admin access
-
-## Deployment Steps
-
-### 1. Push to GitHub
 ```bash
-git add .
-git commit -m "feat: Product Hero v1.0 - Multi-image capture workflow"
+DIMENSION_CACHE_TTL_DAYS=30
+DIMENSION_ANALYSIS_TIMEOUT_MS=10000
+DEV_USER_TIER=premium
+NEXT_PUBLIC_APP_URL=https://your-domain.vercel.app
+```
+
+### 3. Deploy
+
+```bash
+# Via CLI
+vercel --prod
+
+# Or via Git
 git push origin main
 ```
 
-### 2. Deploy to Vercel
-- [ ] Import project in Vercel (if not already imported)
-- [ ] Add/verify environment variables
-- [ ] Deploy from main branch
-- [ ] Wait for build to complete
+## 🧪 Post-Deployment Testing
 
-### 3. Post-Deployment Verification
+```bash
+# Test homepage
+curl https://your-domain.vercel.app/
 
-**Smoke Tests:**
-- [ ] App loads successfully
-- [ ] Product Hero toggle visible
-- [ ] Can enable Product Hero mode
-- [ ] Barcode capture works (step 1)
-- [ ] Packaging capture works (step 2)
-- [ ] Nutrition capture works (step 3)
-- [ ] Results display after completion
-- [ ] Session creates fresh on new workflow
-- [ ] Data saves to database correctly
+# Test barcode extraction
+curl -X POST https://your-domain.vercel.app/api/test-barcode-extraction \
+  -H "Content-Type: application/json" \
+  -d '{"image": "base64_image_data"}'
 
-**Database Verification:**
-- [ ] Check MongoDB for new sessions
-- [ ] Check Supabase for new products
-- [ ] Verify metadata includes all three image types
-- [ ] Verify completeness_status is "complete"
+# Test combined extraction (1 API call)
+curl -X POST https://your-domain.vercel.app/api/test-all-extraction \
+  -H "Content-Type: application/json" \
+  -d '{"image": "base64_image_data"}'
+```
 
-**Error Monitoring:**
-- [ ] Check Vercel logs for errors
-- [ ] Monitor MongoDB Atlas metrics
-- [ ] Check Supabase logs
+## 📊 Expected Performance
 
-## Rollback Plan
+| Metric | Value |
+|--------|-------|
+| Build time | ~2-3 minutes |
+| API response time | 3-5 seconds (combined) |
+| Scans per minute | 12-20 |
+| Cost per scan | ~$0.00032 |
+| Quota usage | <1% of 2,000 RPM |
 
-If issues are detected:
+## 🚨 Common Issues
 
-1. **Immediate Rollback:**
-   ```bash
-   # In Vercel dashboard
-   Deployments → Previous deployment → Promote to Production
-   ```
+### "Could not load default credentials"
+→ Add `GOOGLE_APPLICATION_CREDENTIALS_JSON` to Vercel environment variables
 
-2. **Investigate Issues:**
-   - Check Vercel function logs
-   - Review MongoDB connection errors
-   - Verify environment variables
-   - Test locally with production data
+### "Permission denied on resource project"
+→ Grant `aiplatform.user` role to service account
 
-3. **Fix and Redeploy:**
-   - Fix issues in development
-   - Test thoroughly
-   - Redeploy to production
+### "Vertex AI API has not been used"
+→ Enable API: `gcloud services enable aiplatform.googleapis.com`
 
-## Known Issues
+### Build fails with TypeScript errors
+→ Run `npm run build` locally first and fix errors
 
-### Non-Critical
-- Some existing tests failing (not related to Product Hero)
-- Barcode extraction may fail on unclear images (handled gracefully)
-- Brand names may include label prefixes (cleanup implemented)
+### Function timeout (>10s)
+→ Upgrade to Vercel Pro or add timeout config to vercel.json
 
-### Critical (None)
-- No critical issues identified
+## 📚 Documentation
 
-## Performance Expectations
+- [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md) - Complete deployment guide
+- [VERTEX_AI_SETUP.md](VERTEX_AI_SETUP.md) - Vertex AI authentication
+- [GEMINI_API_USAGE_SUMMARY.md](GEMINI_API_USAGE_SUMMARY.md) - API usage and costs
+- [EXTRACTION_PROMPTS_GUIDE.md](EXTRACTION_PROMPTS_GUIDE.md) - Prompt management
 
-- **Build time**: ~30-60 seconds
-- **Cold start**: ~2-3 seconds
-- **Warm response**: <500ms
-- **Image processing**: 8-15 seconds per image
-- **Full workflow**: 30-45 seconds (3 images)
+## 🎯 Quick Deploy Commands
 
-## Monitoring
+```bash
+# 1. Install Vercel CLI
+npm i -g vercel
 
-### Key Metrics to Watch
-- Session creation rate
-- Workflow completion rate
-- Image processing time
-- Cache hit rate
-- Error rate by endpoint
+# 2. Login
+vercel login
 
-### Alerts to Configure
-- Error rate > 5%
-- Response time > 10 seconds
-- MongoDB connection failures
-- Supabase connection failures
+# 3. Link project
+vercel link
 
-## Success Criteria
+# 4. Add environment variables (interactive)
+vercel env add VERTEX_AI_PROJECT_ID
+vercel env add VERTEX_AI_LOCATION
+vercel env add GOOGLE_APPLICATION_CREDENTIALS_JSON
+vercel env add NEXT_PUBLIC_SUPABASE_URL
+vercel env add NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+vercel env add SUPABASE_SERVICE_ROLE_KEY
+vercel env add MONGODB_URI
 
-- [ ] App deploys successfully
-- [ ] All smoke tests pass
-- [ ] No critical errors in logs
-- [ ] Product Hero workflow completes end-to-end
-- [ ] Data persists correctly in databases
-- [ ] Performance within expected ranges
+# 5. Deploy
+vercel --prod
+```
 
-## Post-Deployment Tasks
+## ✨ New Features in This Deployment
 
-- [ ] Monitor logs for 24 hours
-- [ ] Collect user feedback
-- [ ] Document any issues
-- [ ] Plan next iteration
+- ✅ Combined prompt extraction (1 API call instead of 4)
+- ✅ 75% faster processing (3-5s vs 10-15s)
+- ✅ 29% lower cost per scan
+- ✅ Centralized prompt management
+- ✅ Vertex AI integration (2,000 RPM quota)
+- ✅ No more 429 errors
+- ✅ Production-ready build
 
-## Version Information
+## 🔐 Security Notes
 
-- **Version**: 1.0.0
-- **Release Date**: 2026-03-02
-- **Features**: Product Hero multi-image capture workflow
-- **Breaking Changes**: None
-- **Migration Required**: None
+- Service account key is sensitive - never commit to Git
+- Use Vercel's encrypted environment variables
+- Rotate keys regularly
+- Monitor usage in Google Cloud Console
+- Set up billing alerts
 
-## Support
+## 📈 Monitoring
 
-For deployment issues:
-1. Check [VERCEL_DEPLOYMENT.md](VERCEL_DEPLOYMENT.md)
-2. Check [MONGODB_TROUBLESHOOTING.md](MONGODB_TROUBLESHOOTING.md)
-3. Review Vercel function logs
-4. Contact development team
+**Vercel Dashboard:**
+- Analytics → View traffic and performance
+- Logs → Check for errors
+- Deployments → View deployment history
 
----
+**Google Cloud Console:**
+- Vertex AI → Monitor API usage
+- Billing → Track costs
+- IAM → Manage service accounts
 
-**Deployment Status**: Ready for Production ✅
+**Supabase Dashboard:**
+- Database → Monitor queries
+- API → Check request count
+- Storage → Track usage

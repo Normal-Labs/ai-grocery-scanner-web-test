@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
         confidence = 0.0;
       } else {
         // Try to find array-like structure in text
-        const arrayMatch = rawText.match(/\[(.*?)\]/s);
+        const arrayMatch = rawText.match(/\[([\s\S]*?)\]/);
         if (arrayMatch) {
           try {
             ingredients = JSON.parse('[' + arrayMatch[1] + ']');
