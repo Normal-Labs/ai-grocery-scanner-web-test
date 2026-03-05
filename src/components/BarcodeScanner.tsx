@@ -36,10 +36,11 @@ declare global {
 interface BarcodeScannerProps {
   onScanComplete: (result: { barcode?: string; image?: string; imageMimeType?: string }) => void;
   onError?: (error: string) => void;
+  onClose?: () => void;
   scanType?: 'barcode' | 'packaging' | 'ingredients' | 'nutrition facts';
 }
 
-export default function BarcodeScanner({ onScanComplete, onError, scanType = 'barcode' }: BarcodeScannerProps) {
+export default function BarcodeScanner({ onScanComplete, onError, onClose, scanType = 'barcode' }: BarcodeScannerProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [detectedBarcode, setDetectedBarcode] = useState<string | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
@@ -137,8 +138,8 @@ export default function BarcodeScanner({ onScanComplete, onError, scanType = 'ba
     }
   };
 
-  // Stop camera
-  const stopCamera = () => {
+  // Stop camera and cleanup resources
+  const cleanupCamera = () => {
     // Requirement 11.7: Release resources on component unmount
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -150,7 +151,19 @@ export default function BarcodeScanner({ onScanComplete, onError, scanType = 'ba
     }
 
     setIsScanning(false);
+    setCapturedImage(null);
+    setDetectedBarcode(null);
     console.log('[Barcode Scanner] 🛑 Camera stopped');
+  };
+
+  // Stop camera and notify parent to close
+  const stopCamera = () => {
+    cleanupCamera();
+    
+    // Notify parent to close the scanner
+    if (onClose) {
+      onClose();
+    }
   };
 
   // Capture image and detect barcode
@@ -268,32 +281,54 @@ export default function BarcodeScanner({ onScanComplete, onError, scanType = 'ba
     }
   };
 
-  // Cleanup on unmount
+  // Cleanup on unmount (don't call onClose here to avoid circular unmount)
   useEffect(() => {
     return () => {
-      stopCamera();
+      cleanupCamera();
     };
   }, []);
 
   return (
-    <div className="barcode-scanner h-full flex flex-col">
+    <div className="barcode-scanner h-full flex flex-col bg-black">
       {cameraError && (
-        <div className="p-4 bg-red-50 border border-red-200 rounded-lg m-4">
-          <p className="text-red-800">
-            <strong>Camera Error:</strong> {cameraError}
-          </p>
-          <p className="text-sm text-red-600 mt-2">
-            Please ensure camera permissions are granted and try again.
-          </p>
+        <div className="absolute inset-0 flex items-center justify-center z-10 bg-black bg-opacity-75">
+          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 m-4 max-w-md">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div>
+                <h3 className="font-bold text-red-900 mb-2">Camera Error</h3>
+                <p className="text-red-800 text-sm mb-4">{cameraError}</p>
+                <p className="text-xs text-red-600 mb-4">
+                  Please ensure camera permissions are granted and try again.
+                </p>
+                <button
+                  onClick={startCamera}
+                  className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors text-sm font-medium"
+                >
+                  Try Again
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading State - shown while camera is initializing */}
+      {!isScanning && !capturedImage && !cameraError && (
+        <div className="absolute inset-0 flex items-center justify-center z-10">
+          <div className="text-center">
+            <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-white border-t-transparent mb-4"></div>
+            <p className="text-white text-lg font-medium">Starting camera...</p>
+          </div>
         </div>
       )}
 
       {isScanning && (
-        <div className="relative flex-1 flex flex-col bg-black">
+        <div className="relative flex-1 flex flex-col bg-black overflow-hidden">
           {/* Close button - top right */}
           <button
             onClick={stopCamera}
-            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors"
+            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-lg"
           >
             ✕ Close
           </button>
@@ -306,29 +341,31 @@ export default function BarcodeScanner({ onScanComplete, onError, scanType = 'ba
             muted
           />
 
-          {/* Bottom controls */}
-          <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black to-transparent">
-            {/* Instruction text */}
-            <p className="text-center text-white text-base mb-4">
-              Point camera at {scanType} and take a picture
-            </p>
+          {/* Bottom controls - fixed with safe area */}
+          <div className="absolute bottom-0 left-0 right-0 pb-safe">
+            <div className="p-6 bg-gradient-to-t from-black via-black/80 to-transparent">
+              {/* Instruction text */}
+              <p className="text-center text-white text-base mb-4 font-medium">
+                Point camera at {scanType} and take a picture
+              </p>
 
-            {/* Action buttons */}
-            <div className="flex gap-4 justify-center">
-              <button
-                onClick={stopCamera}
-                className="px-8 py-4 bg-red-600 text-white rounded-full font-semibold hover:bg-red-700 transition-colors text-lg"
-              >
-                ✕ Cancel
-              </button>
-              
-              <button
-                onClick={captureAndDetect}
-                disabled={processing}
-                className="px-8 py-4 bg-white text-gray-900 rounded-full font-semibold hover:bg-gray-100 disabled:bg-gray-400 transition-colors text-lg"
-              >
-                {processing ? '⏳ Processing...' : '📷 Capture'}
-              </button>
+              {/* Action buttons */}
+              <div className="flex gap-4 justify-center items-center">
+                <button
+                  onClick={stopCamera}
+                  className="px-8 py-4 bg-red-600 text-white rounded-full font-semibold hover:bg-red-700 active:bg-red-800 transition-colors text-lg shadow-lg min-w-[140px]"
+                >
+                  ✕ Cancel
+                </button>
+                
+                <button
+                  onClick={captureAndDetect}
+                  disabled={processing}
+                  className="px-8 py-4 bg-white text-gray-900 rounded-full font-semibold hover:bg-gray-100 active:bg-gray-200 disabled:bg-gray-400 disabled:text-gray-600 transition-colors text-lg shadow-lg min-w-[140px]"
+                >
+                  {processing ? '⏳ Processing...' : '📷 Capture'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

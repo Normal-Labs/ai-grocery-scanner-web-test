@@ -271,6 +271,7 @@ export default function TestBarcodePage() {
             <BarcodeScanner
               scanType="barcode"
               onScanComplete={handleScanComplete}
+              onClose={() => setShowScanner(false)}
               onError={(error) => {
                 setError(error);
                 setShowScanner(false);

@@ -442,6 +442,7 @@ export default function TestNutritionPage() {
             <ImageScanner
               scanType="nutrition facts"
               onScanComplete={handleScanComplete}
+              onClose={() => setShowScanner(false)}
               onError={(error) => {
                 setError(error);
                 setShowScanner(false);

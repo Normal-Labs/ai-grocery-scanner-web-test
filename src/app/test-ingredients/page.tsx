@@ -309,6 +309,7 @@ export default function TestIngredientsPage() {
             <ImageScanner
               scanType="ingredients"
               onScanComplete={handleScanComplete}
+              onClose={() => setShowScanner(false)}
               onError={(error) => {
                 setError(error);
                 setShowScanner(false);

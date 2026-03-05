@@ -487,6 +487,7 @@ export default function TestAllPage() {
             <ImageScanner
               scanType="packaging"
               onScanComplete={handleScanComplete}
+              onClose={() => setShowScanner(false)}
               onError={(error) => {
                 setError(error);
                 setShowScanner(false);
