@@ -29,6 +29,38 @@ A mobile-first web application that enables consumers to capture images of groce
   - Supabase (product registry, user data, inventory tracking)
 - **Testing**: Jest + React Testing Library + fast-check (property-based testing)
 
+## Documentation
+
+📚 **[Complete Documentation Index](DOCS_INDEX.md)** - Start here for all documentation
+
+### Quick Links
+
+- **Setup & Configuration**
+  - [Setup Guide](SETUP.md)
+  - [Required Environment Variables](REQUIRED_ENV_VARS.md)
+  - [MongoDB Setup](MONGODB_SETUP.md)
+
+- **Extraction Testing**
+  - [Extraction Testing Overview](EXTRACTION_TESTING.md)
+  - [Ingredients Extraction Guide](INGREDIENTS_EXTRACTION_GUIDE.md)
+  - [Nutrition Extraction Guide](NUTRITION_EXTRACTION_GUIDE.md)
+
+- **Database & Schema**
+  - [Products Dev Migration](PRODUCTS_DEV_MIGRATION.md)
+  - [Ingredients Column Migration](INGREDIENTS_COLUMN_MIGRATION.md)
+
+- **Deployment**
+  - [Vercel Deployment](VERCEL_DEPLOYMENT.md)
+  - [Deployment Checklist](DEPLOYMENT_CHECKLIST.md)
+
+### Test Pages
+
+Test and validate extraction functionality:
+- `/test-barcode` - Barcode detection testing
+- `/test-packaging` - Product info extraction testing
+- `/test-ingredients` - Ingredient list extraction testing
+- `/test-nutrition` - Nutrition facts extraction testing
+
 ## Getting Started
 
 ### Prerequisites

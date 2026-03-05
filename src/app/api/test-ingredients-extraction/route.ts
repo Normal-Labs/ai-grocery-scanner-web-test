@@ -171,8 +171,8 @@ EXAMPLE OUTPUT:
         const { error: dbError } = await supabase
           .from('products_dev')
           .insert({
+            ingredients, // Store in dedicated ingredients column
             metadata: {
-              ingredients,
               ingredient_count: ingredients.length,
               detection_method: 'OCR',
               confidence,

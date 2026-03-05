@@ -187,20 +187,46 @@ Return ONLY a JSON object with this structure:
 
 ## Database Storage
 
-Ingredients are stored in the `products_dev` table metadata field:
+Ingredients are stored in the `products_dev` table in a dedicated `ingredients` TEXT[] column:
 
 ```sql
+-- Table structure
+CREATE TABLE products_dev (
+  id UUID PRIMARY KEY,
+  ingredients TEXT[],  -- Array of ingredients
+  metadata JSONB,      -- Additional extraction metadata
+  ...
+);
+
+-- Example row
 {
-  "ingredients": ["ingredient 1", "ingredient 2", ...],
-  "ingredient_count": 8,
-  "detection_method": "OCR",
-  "confidence": 0.95,
-  "raw_ocr_text": "...",
-  "image_preview": "...",
-  "extraction_type": "ingredients",
-  "notes": "..."
+  "id": "...",
+  "ingredients": [
+    "Water",
+    "Enriched Flour (wheat flour, niacin, reduced iron)",
+    "Sugar",
+    "Vegetable Oil (soybean and/or palm oil)",
+    "Salt"
+  ],
+  "metadata": {
+    "ingredient_count": 5,
+    "detection_method": "OCR",
+    "confidence": 0.95,
+    "raw_ocr_text": "...",
+    "extraction_type": "ingredients",
+    "notes": "Clear ingredient list found"
+  }
 }
 ```
+
+### Why TEXT[] Array?
+
+Using a PostgreSQL array provides several benefits:
+- **Efficient Queries**: Search for specific ingredients using `ANY()` or `@>` operators
+- **Order Preservation**: Ingredients maintain their order (important for regulations)
+- **Type Safety**: Each element is a string, no parsing needed
+- **Indexing**: GIN indexes enable fast ingredient searches
+- **Native Support**: PostgreSQL arrays are well-supported in Supabase
 
 ## Testing Best Practices
 
@@ -256,25 +282,80 @@ Ingredients are stored in the `products_dev` table metadata field:
 
 ## Query Examples
 
+### Find All Products with Ingredients
+```sql
+SELECT 
+  id,
+  name,
+  ingredients,
+  array_length(ingredients, 1) as ingredient_count,
+  created_at
+FROM products_dev
+WHERE ingredients IS NOT NULL
+ORDER BY created_at DESC;
+```
+
+### Find Products with Specific Ingredient
+```sql
+SELECT 
+  id,
+  name,
+  ingredients
+FROM products_dev
+WHERE 'Sugar' = ANY(ingredients)
+ORDER BY created_at DESC;
+```
+
+### Find Products with Ingredient Containing Text
+```sql
+SELECT 
+  id,
+  name,
+  ingredients
+FROM products_dev
+WHERE EXISTS (
+  SELECT 1 FROM unnest(ingredients) AS ingredient 
+  WHERE ingredient ILIKE '%wheat%'
+)
+ORDER BY created_at DESC;
+```
+
 ### Find Extractions with Sub-Ingredients
 ```sql
 SELECT 
-  metadata->'ingredients' as ingredients,
+  id,
+  ingredients,
   metadata->>'confidence' as confidence
 FROM products_dev
-WHERE metadata->>'extraction_type' = 'ingredients'
-  AND metadata->>'raw_ocr_text' LIKE '%(%'
+WHERE ingredients IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM unnest(ingredients) AS ingredient 
+    WHERE ingredient LIKE '%(%'
+  )
 ORDER BY created_at DESC;
+```
+
+### Count Ingredients Per Product
+```sql
+SELECT 
+  id,
+  name,
+  array_length(ingredients, 1) as ingredient_count,
+  metadata->>'confidence' as confidence
+FROM products_dev
+WHERE ingredients IS NOT NULL
+ORDER BY ingredient_count DESC;
 ```
 
 ### Find Low Confidence Extractions
 ```sql
 SELECT 
-  metadata->'ingredients' as ingredients,
+  id,
+  ingredients,
   metadata->>'confidence' as confidence,
   metadata->>'notes' as notes
 FROM products_dev
-WHERE metadata->>'extraction_type' = 'ingredients'
+WHERE ingredients IS NOT NULL
   AND (metadata->>'confidence')::DECIMAL < 0.7
 ORDER BY created_at DESC;
 ```
@@ -282,12 +363,24 @@ ORDER BY created_at DESC;
 ### Find Incomplete Lists
 ```sql
 SELECT 
-  metadata->'ingredients' as ingredients,
-  metadata->>'ingredient_count' as count
+  id,
+  ingredients,
+  array_length(ingredients, 1) as count
 FROM products_dev
-WHERE metadata->>'extraction_type' = 'ingredients'
-  AND (metadata->>'ingredient_count')::INTEGER < 3
+WHERE ingredients IS NOT NULL
+  AND array_length(ingredients, 1) < 3
 ORDER BY created_at DESC;
+```
+
+### Average Ingredient Count
+```sql
+SELECT 
+  ROUND(AVG(array_length(ingredients, 1)), 1) as avg_ingredient_count,
+  MIN(array_length(ingredients, 1)) as min_count,
+  MAX(array_length(ingredients, 1)) as max_count,
+  COUNT(*) as total_products
+FROM products_dev
+WHERE ingredients IS NOT NULL;
 ```
 
 ## Success Metrics

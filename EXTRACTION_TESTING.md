@@ -132,10 +132,74 @@ CREATE TABLE products_dev (
 - ✓ Confidence ≥0.7 (High) / ⚠ <0.7 (Medium - verify accuracy)
 - ✓ Sub-ingredients preserved / ○ None detected
 
-### 4. Nutrition Label Extraction Test (Coming Soon)
+### 4. Nutrition Facts Extraction Test
 **URL**: `/test-nutrition`
 
-**Purpose**: Test nutrition facts extraction from nutrition labels.
+**Purpose**: Test nutrition facts extraction with units and daily values using Gemini Vision OCR.
+
+**Features**:
+- Extracts complete nutrition facts from Nutrition Facts table
+- Captures serving size and servings per container
+- Extracts all macronutrients with values, units, and %DV
+- Extracts vitamins and minerals if present
+- Ignores marketing claims outside the table
+- Shows confidence scores and quality indicators
+- Displays processing time and image size
+- Saves results to `products_dev` table in structured JSONB format
+- Shows raw OCR text for debugging
+
+**How to Use**:
+1. Navigate to `/test-nutrition`
+2. Click "Scan Nutrition Facts"
+3. Point camera at Nutrition Facts table on product
+4. Ensure entire table is visible (header to bottom)
+5. Capture the image
+6. Review results showing:
+   - Serving information (size, servings per container, calories)
+   - Complete macronutrient breakdown
+   - Vitamins and minerals (if present)
+   - Confidence score and quality checks
+   - Processing metrics
+
+**Extraction Rules**:
+- **Table Integrity**: Only extract from official Nutrition Facts table
+- **Discard Marketing**: Ignore promotional callouts outside table
+- **Unit Mapping**: Always include units (g, mg, mcg, kcal)
+- **Daily Value**: Extract %DV when present
+- **Serving Size**: Always capture serving size and servings per container
+- **Required Fields**: All standard macronutrients must be present
+
+**Data Structure**:
+```json
+{
+  "serving_size": "1 cup (240ml)",
+  "servings_per_container": 8,
+  "calories_per_serving": 150,
+  "macros": {
+    "total_fat": {"value": 8, "unit": "g", "dv_percent": 10},
+    "saturated_fat": {"value": 1, "unit": "g", "dv_percent": 5},
+    "trans_fat": {"value": 0, "unit": "g"},
+    "cholesterol": {"value": 0, "unit": "mg", "dv_percent": 0},
+    "sodium": {"value": 100, "unit": "mg", "dv_percent": 4},
+    "total_carbohydrate": {"value": 12, "unit": "g", "dv_percent": 4},
+    "dietary_fiber": {"value": 0, "unit": "g", "dv_percent": 0},
+    "total_sugars": {"value": 12, "unit": "g"},
+    "added_sugars": {"value": 0, "unit": "g", "dv_percent": 0},
+    "protein": {"value": 8, "unit": "g", "dv_percent": 16}
+  },
+  "vitamins_minerals": {
+    "vitamin_d": {"value": 2.5, "unit": "mcg", "dv_percent": 10},
+    "calcium": {"value": 300, "unit": "mg", "dv_percent": 25},
+    "iron": {"value": 0, "unit": "mg", "dv_percent": 0},
+    "potassium": {"value": 350, "unit": "mg", "dv_percent": 8}
+  }
+}
+```
+
+**Quality Indicators**:
+- ✓ Confidence ≥0.7 (High) / ⚠ <0.7 (Medium - verify accuracy)
+- ✓ Serving size captured / ✗ Missing
+- ✓ Macronutrients complete / ✗ Incomplete
 
 ## Analyzing Results
 
@@ -169,27 +233,81 @@ WHERE product_name IS NOT NULL OR brand IS NOT NULL;
 ```sql
 SELECT 
   COUNT(*) as total_extractions,
-  ROUND(AVG((metadata->>'ingredient_count')::INTEGER), 1) as avg_ingredient_count,
+  ROUND(AVG(array_length(ingredients, 1)), 1) as avg_ingredient_count,
   ROUND(AVG((metadata->>'confidence')::DECIMAL), 2) as avg_confidence,
-  COUNT(*) FILTER (WHERE (metadata->>'ingredient_count')::INTEGER >= 3) as complete_lists,
-  COUNT(*) FILTER (WHERE (metadata->>'ingredient_count')::INTEGER < 3) as incomplete_lists
+  COUNT(*) FILTER (WHERE array_length(ingredients, 1) >= 3) as complete_lists,
+  COUNT(*) FILTER (WHERE array_length(ingredients, 1) < 3) as incomplete_lists
 FROM products_dev
-WHERE metadata->>'extraction_type' = 'ingredients';
+WHERE ingredients IS NOT NULL;
 ```
 
 ### View Ingredients with Sub-Components
 ```sql
 SELECT 
   id,
-  metadata->'ingredients' as ingredients,
-  metadata->>'ingredient_count' as count,
+  ingredients,
+  array_length(ingredients, 1) as count,
   metadata->>'confidence' as confidence,
   created_at
 FROM products_dev
-WHERE metadata->>'extraction_type' = 'ingredients'
-  AND metadata->>'raw_ocr_text' LIKE '%(%'
+WHERE ingredients IS NOT NULL
+  AND EXISTS (
+    SELECT 1 FROM unnest(ingredients) AS ingredient 
+    WHERE ingredient LIKE '%(%'
+  )
 ORDER BY created_at DESC
 LIMIT 10;
+```
+
+### Query Nutrition Facts Extraction Success Rate
+```sql
+SELECT 
+  COUNT(*) as total_extractions,
+  ROUND(AVG((metadata->>'confidence')::DECIMAL), 2) as avg_confidence,
+  COUNT(*) FILTER (WHERE nutrition_facts->>'serving_size' IS NOT NULL) as has_serving_size,
+  COUNT(*) FILTER (WHERE nutrition_facts->'macros' IS NOT NULL) as has_macros,
+  COUNT(*) FILTER (WHERE nutrition_facts->'vitamins_minerals' IS NOT NULL) as has_vitamins
+FROM products_dev
+WHERE nutrition_facts IS NOT NULL;
+```
+
+### Find High Protein Products
+```sql
+SELECT 
+  id,
+  name,
+  nutrition_facts->>'serving_size' as serving_size,
+  nutrition_facts->'macros'->'protein'->>'value' as protein_g,
+  created_at
+FROM products_dev
+WHERE (nutrition_facts->'macros'->'protein'->>'value')::NUMERIC > 10
+ORDER BY (nutrition_facts->'macros'->'protein'->>'value')::NUMERIC DESC;
+```
+
+### Find Low Sodium Products
+```sql
+SELECT 
+  id,
+  name,
+  nutrition_facts->'macros'->'sodium'->>'value' as sodium_mg,
+  nutrition_facts->'macros'->'sodium'->>'dv_percent' as sodium_dv,
+  created_at
+FROM products_dev
+WHERE (nutrition_facts->'macros'->'sodium'->>'value')::NUMERIC < 100
+ORDER BY (nutrition_facts->'macros'->'sodium'->>'value')::NUMERIC ASC;
+```
+
+### Find Products with Added Sugars
+```sql
+SELECT 
+  id,
+  name,
+  nutrition_facts->'macros'->'added_sugars'->>'value' as added_sugars_g,
+  nutrition_facts->'macros'->'added_sugars'->>'dv_percent' as added_sugars_dv,
+  created_at
+FROM products_dev
+WHERE (nutrition_facts->'macros'->'added_sugars'->>'value')::NUMERIC > 0
+ORDER BY (nutrition_facts->'macros'->'added_sugars'->>'value')::NUMERIC DESC;
 ```
 
 ### Find Incomplete Packaging Extractions

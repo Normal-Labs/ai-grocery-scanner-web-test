@@ -29,6 +29,8 @@ The `products_dev` table has been recreated to match the `products` table schema
 - brand VARCHAR(255)             -- Brand name
 - size VARCHAR(100)              -- Size/quantity
 - category VARCHAR(100)          -- Product category
+- ingredients TEXT[]             -- Array of ingredients
+- nutrition_facts JSONB          -- Structured nutrition data
 - image_url TEXT                 -- Image URL (optional)
 - metadata JSONB                 -- Flexible metadata storage
 - flagged_for_review BOOLEAN     -- Review flag
@@ -100,6 +102,16 @@ Both test API endpoints have been updated:
 - Stores brand, size, category in respective fields
 - Stores packaging type, confidence, and raw OCR text in `metadata`
 
+### Ingredients Extraction API
+- Stores ingredient list in `ingredients` array field
+- Stores ingredient count, confidence, and raw OCR text in `metadata`
+
+### Nutrition Facts Extraction API
+- Stores complete nutrition data in `nutrition_facts` JSONB field
+- Includes serving size, calories, macros, and vitamins/minerals
+- Each nutrient has value, unit, and daily value percentage
+- Stores confidence and raw OCR text in `metadata`
+
 ## Querying Examples
 
 ### Find all barcode extractions
@@ -114,6 +126,66 @@ ORDER BY created_at DESC;
 SELECT * FROM products_dev 
 WHERE name IS NOT NULL 
 ORDER BY created_at DESC;
+```
+
+### Find all ingredients extractions
+```sql
+SELECT * FROM products_dev 
+WHERE ingredients IS NOT NULL 
+ORDER BY created_at DESC;
+```
+
+### Find products with specific ingredient
+```sql
+SELECT * FROM products_dev 
+WHERE 'Sugar' = ANY(ingredients)
+ORDER BY created_at DESC;
+```
+
+### Find products with ingredient containing text
+```sql
+SELECT * FROM products_dev 
+WHERE EXISTS (
+  SELECT 1 FROM unnest(ingredients) AS ingredient 
+  WHERE ingredient ILIKE '%wheat%'
+)
+ORDER BY created_at DESC;
+```
+
+### Count ingredients per product
+```sql
+SELECT 
+  id,
+  name,
+  array_length(ingredients, 1) as ingredient_count,
+  created_at
+FROM products_dev 
+WHERE ingredients IS NOT NULL 
+ORDER BY ingredient_count DESC;
+```
+
+### Find high protein products
+```sql
+SELECT 
+  id,
+  name,
+  nutrition_facts->'macros'->'protein'->>'value' as protein_g,
+  nutrition_facts->>'serving_size' as serving_size
+FROM products_dev
+WHERE (nutrition_facts->'macros'->'protein'->>'value')::NUMERIC > 10
+ORDER BY (nutrition_facts->'macros'->'protein'->>'value')::NUMERIC DESC;
+```
+
+### Find products with added sugars
+```sql
+SELECT 
+  id,
+  name,
+  nutrition_facts->'macros'->'added_sugars'->>'value' as added_sugars_g,
+  nutrition_facts->'macros'->'added_sugars'->>'dv_percent' as dv_percent
+FROM products_dev
+WHERE (nutrition_facts->'macros'->'added_sugars'->>'value')::NUMERIC > 0
+ORDER BY (nutrition_facts->'macros'->'added_sugars'->>'value')::NUMERIC DESC;
 ```
 
 ### Find extractions by method
