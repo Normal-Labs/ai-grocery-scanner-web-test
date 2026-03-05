@@ -67,10 +67,30 @@ export class GeminiWrapper {
     location: string = VERTEX_AI_CONFIG.location,
     modelName: string = GEMINI_MODEL
   ) {
-    this.vertexAI = new VertexAI({
+    // Handle credentials from environment variable (for Vercel deployment)
+    let googleAuthOptions: any = {
       project: projectId,
       location: location,
-    });
+    };
+
+    // Check if credentials are provided as JSON string (Vercel deployment)
+    if (process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON) {
+      try {
+        const credentials = JSON.parse(process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON);
+        googleAuthOptions.googleAuthOptions = {
+          credentials: credentials,
+        };
+        console.log('[Gemini Wrapper] 🔑 Using credentials from GOOGLE_APPLICATION_CREDENTIALS_JSON');
+      } catch (error) {
+        console.error('[Gemini Wrapper] ❌ Failed to parse GOOGLE_APPLICATION_CREDENTIALS_JSON:', error);
+      }
+    } else if (process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+      console.log('[Gemini Wrapper] 🔑 Using credentials from GOOGLE_APPLICATION_CREDENTIALS file path');
+    } else {
+      console.log('[Gemini Wrapper] 🔑 Using Application Default Credentials (gcloud auth)');
+    }
+
+    this.vertexAI = new VertexAI(googleAuthOptions);
     
     this.model = this.vertexAI.getGenerativeModel({
       model: modelName,
