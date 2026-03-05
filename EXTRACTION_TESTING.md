@@ -201,6 +201,53 @@ CREATE TABLE products_dev (
 - ✓ Serving size captured / ✗ Missing
 - ✓ Macronutrients complete / ✗ Incomplete
 
+### 5. Complete Extraction Test
+**URL**: `/test-all`
+
+**Purpose**: Test all extraction types sequentially from a single image.
+
+**Features**:
+- Orchestrates all 4 extraction types in sequence
+- Single image capture for complete product profile
+- Rate limiting delays (2s between steps) to avoid 429 errors
+- Shows progress for each extraction step
+- Continues even if one step fails
+- Saves complete product to `products_dev` table
+- Scrollable results view with detailed breakdown
+- Shows status, confidence, and processing time per step
+
+**How to Use**:
+1. Navigate to `/test-all`
+2. Click "Start Complete Scan"
+3. Capture ONE image showing product (barcode, packaging, ingredients, nutrition)
+4. Wait for all extractions to complete (~10-15 seconds)
+5. Review results for each step:
+   - Barcode detection
+   - Packaging information
+   - Ingredients list
+   - Nutrition facts
+
+**Extraction Sequence**:
+1. **Initial Delay** (1s)
+2. **Barcode Detection** (5s delay)
+3. **Packaging Information** (5s delay)
+4. **Ingredients List** (5s delay)
+5. **Nutrition Facts**
+
+**Results Display**:
+- Summary banner with overall metrics
+- Step status overview (success/failed/processing)
+- Detailed scrollable results for each extraction
+- Failed steps section with error messages
+- Complete product saved to database
+
+**Benefits**:
+- Test complete extraction pipeline
+- Validate all extraction types at once
+- Identify which extractions work best
+- Realistic end-to-end testing
+- Rate limiting prevents API errors
+
 ## Analyzing Results
 
 ### Query Barcode Detection Success Rate

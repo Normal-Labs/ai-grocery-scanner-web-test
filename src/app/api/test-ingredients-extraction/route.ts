@@ -66,9 +66,10 @@ CRITICAL RULES:
    - Skip any text that is not part of the actual ingredient list
 
 2. BOUNDARY DETECTION:
-   - Start extraction at the word "Ingredients" (or "INGREDIENTS:", "Ingredientes:", etc.)
-   - Stop extraction once the list ends (usually marked by a change in font/layout or start of nutrition facts)
-   - Do NOT include allergen statements like "Contains: milk, soy"
+   - START extraction at the word "Ingredients" (or "INGREDIENTS:", "Ingredientes:", etc.)
+   - STOP extraction when you see "Contains:" or "CONTAINS:" (allergen statement)
+   - STOP at any change in font/layout or start of nutrition facts
+   - Do NOT include allergen statements like "Contains: milk, soy" or "CONTAINS: WHEAT, SOY"
    - Do NOT include manufacturing statements like "Manufactured in a facility..."
 
 3. PRESERVE SUB-INGREDIENTS:
@@ -76,16 +77,33 @@ CRITICAL RULES:
    - Example: "Enriched Flour (wheat flour, niacin, reduced iron)" - keep the entire structure
    - Maintain nested parentheses if present
 
-4. FORMATTING:
+4. SPLIT ON COMMAS:
+   - Split ingredients by COMMAS, not line breaks
+   - Ignore line breaks in the OCR text
+   - Each comma-separated item is one ingredient
+   - Keep sub-ingredients in parentheses together
+   - If an ingredient spans multiple lines, join it into one array element
+
+5. FORMATTING:
    - Return ingredients as a comma-separated list
    - Preserve capitalization as it appears
    - Keep percentage indicators if present (e.g., "Water (60%)")
    - Maintain "and/or" statements if present
 
-5. NO HALLUCINATION:
+6. NO HALLUCINATION:
    - If you cannot find a clear ingredient list, return "NONE"
    - Do not generate or guess ingredients
    - Only extract what is clearly visible
+
+IMPORTANT:
+- Split ONLY on commas, NOT on line breaks
+- Each ingredient must be a SEPARATE array element
+- Do NOT include the word "INGREDIENTS:" or "Ingredients:" in any array element
+- Remove "INGREDIENTS:" prefix from the first ingredient
+- STOP extraction when you see "CONTAINS:" or "Contains:"
+- Do NOT include allergen statements
+- Preserve capitalization and sub-ingredients in parentheses
+- If an ingredient spans multiple lines, join it into one array element
 
 Return ONLY a JSON object with this structure:
 {
@@ -105,6 +123,15 @@ EXAMPLE OUTPUT:
   ],
   "confidence": 0.95,
   "notes": "Clear ingredient list found"
+}
+
+EXAMPLE 2 (Multi-line OCR):
+Input: "INGREDIENTS: Whole Grain Blend (Rolled
+Oats, Wheat), Sugar, Salt CONTAINS: WHEAT"
+Output: {
+  "ingredients": ["Whole Grain Blend (Rolled Oats, Wheat)", "Sugar", "Salt"],
+  "confidence": 0.9,
+  "notes": "Joined multi-line ingredients, stopped at CONTAINS"
 }`;
 
     const result = await model.generateContent([
@@ -139,6 +166,14 @@ EXAMPLE OUTPUT:
       extractedData = JSON.parse(jsonText);
       ingredients = extractedData.ingredients || [];
       confidence = extractedData.confidence || 0.5;
+      
+      // Post-processing: Remove "INGREDIENTS:" prefix from first ingredient if present
+      if (ingredients.length > 0) {
+        ingredients[0] = ingredients[0]
+          .replace(/^INGREDIENTS:\s*/i, '')
+          .replace(/^Ingredients:\s*/i, '')
+          .trim();
+      }
       
       console.log('[Test Ingredients API] ✅ Parsed ingredients:', ingredients.length, 'items');
     } catch (parseError) {

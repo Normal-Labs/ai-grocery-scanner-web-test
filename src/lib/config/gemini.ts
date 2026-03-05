@@ -9,14 +9,24 @@
  * Default Gemini model to use for all API calls
  * 
  * Available models:
+ * - gemini-2.0-flash: Stable 2.0 model (current)
  * - gemini-2.0-flash-exp: Latest experimental model (fastest, most capable)
- * - gemini-2.0-flash: Stable 2.0 model
  * - gemini-1.5-flash: Legacy 1.5 model (deprecated, may not be available)
  * - gemini-1.5-pro: Legacy 1.5 pro model (deprecated, may not be available)
  * 
  * Note: Always use gemini-2.0-flash or newer to avoid 404 errors.
  */
 export const GEMINI_MODEL = 'gemini-2.0-flash';
+
+/**
+ * Vertex AI Configuration
+ * 
+ * Using Vertex AI instead of Generative Language API to access proper tier quotas.
+ */
+export const VERTEX_AI_CONFIG = {
+  projectId: process.env.VERTEX_AI_PROJECT_ID || 'gen-lang-client-0628770168',
+  location: process.env.VERTEX_AI_LOCATION || 'us-central1',
+} as const;
 
 /**
  * Gemini API configuration

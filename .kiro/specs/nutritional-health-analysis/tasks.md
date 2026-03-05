@@ -398,23 +398,23 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - _Requirements: 5.4, 5.6, 5.7, 6.7, 7.1-7.9_
 
 - [ ] 16. Phase 6: Premium Features - Enhanced Analysis
-  - [~] 16.1 Implement micronutrient analysis for premium tier
+  - [ ] 16.1 Implement micronutrient analysis for premium tier
     - Extract vitamin and mineral data with detailed percentages
     - Display in enhanced nutritional breakdown
     - _Requirements: 9.1_
   
-  - [~] 16.2 Add ingredient research with Tavily search
+  - [ ] 16.2 Add ingredient research with Tavily search
     - Integrate Tavily API for ingredient health impact research
     - Search for each flagged ingredient (preservatives, sweeteners, colors)
     - Display research findings with citations
     - _Requirements: 9.2, 9.4_
   
-  - [~] 16.3 Implement product category comparison
+  - [ ] 16.3 Implement product category comparison
     - Compare health score against similar products in category
     - Display percentile ranking
     - _Requirements: 9.3_
   
-  - [~] 16.4 Generate personalized recommendations
+  - [ ] 16.4 Generate personalized recommendations
     - Add `generateRecommendations()` method to HealthScorer
     - Consider user dietary preferences if configured
     - Display recommendations in UI
@@ -432,14 +432,14 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - **Validates: Requirements 9.1, 9.2, 9.3, 9.4, 9.5**
 
 - [ ] 17. Phase 6: Premium Features - Tier Gating
-  - [~] 17.1 Implement tier-based feature flags
+  - [ ] 17.1 Implement tier-based feature flags
     - Check user tier in NutritionOrchestrator
     - Enable/disable features based on tier
     - Free tier: basic nutritional facts and ingredient parsing only
     - Premium tier: all enhanced features
     - _Requirements: 9.6, 9.7_
   
-  - [~] 17.2 Add upgrade prompts for free tier users
+  - [ ] 17.2 Add upgrade prompts for free tier users
     - Display upgrade prompt in UI when viewing nutrition results
     - Highlight premium features that are locked
     - _Requirements: 9.7_
@@ -455,17 +455,17 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - **Validates: Requirements 9.6, 9.7**
 
 - [ ] 18. Phase 7: Polish & Optimization - Performance
-  - [~] 18.1 Implement image compression before OCR
+  - [ ] 18.1 Implement image compression before OCR
     - Compress images to optimal size for Gemini Vision
     - Maintain quality while reducing file size
     - _Requirements: 1.6_
   
-  - [~] 18.2 Optimize parallel parsing
+  - [ ] 18.2 Optimize parallel parsing
     - Ensure NutritionParser and IngredientParser run in parallel
     - Minimize total processing time
     - _Requirements: 2.1-2.10, 3.1-3.8_
   
-  - [~] 18.3 Add cache warming strategies
+  - [ ] 18.3 Add cache warming strategies
     - Pre-cache popular products
     - Implement cache preloading for frequently scanned items
     - _Requirements: 6.6_
@@ -479,17 +479,17 @@ This implementation plan breaks down the Nutritional Health Analysis feature int
     - _Requirements: 1.6_
 
 - [ ] 19. Phase 7: Polish & Optimization - User Corrections
-  - [~] 19.1 Implement manual correction UI
+  - [ ] 19.1 Implement manual correction UI
     - Add edit mode for nutritional values
     - Allow users to correct OCR errors
     - _Requirements: 10.6_
   
-  - [~] 19.2 Store original and corrected values
+  - [ ] 19.2 Store original and corrected values
     - Save both OCR result and user correction in database
     - Track correction history for model improvement
     - _Requirements: 10.7_
   
-  - [~] 19.3 Add validation prompt for discrepancies
+  - [ ] 19.3 Add validation prompt for discrepancies
     - Prompt user to verify when validation fails
     - Display specific validation errors
     - _Requirements: 10.5_
