@@ -17,6 +17,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
 import { combineExtractionPrompts } from '@/lib/prompts/extraction-prompts';
+import { getDimensionPrompt } from '@/lib/prompts/dimension-prompts';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -36,6 +37,39 @@ interface ExtractionStep {
   processingTime?: number;
 }
 
+interface HealthDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  confidence: number;
+}
+
+interface ProcessingDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  additives_detected: {
+    preservatives: string[];
+    artificial_sweeteners: string[];
+    artificial_colors: string[];
+    other_additives: string[];
+  };
+  confidence: number;
+}
+
+interface AllergensDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  allergens_detected: {
+    major_allergens: string[];
+    other_allergens: string[];
+    cross_contamination_warnings: string[];
+    allergen_free_claims: string[];
+  };
+  confidence: number;
+}
+
 interface AllExtractionResponse {
   success: boolean;
   steps: {
@@ -44,6 +78,9 @@ interface AllExtractionResponse {
     ingredients: ExtractionStep;
     nutrition: ExtractionStep;
   };
+  healthDimension?: HealthDimensionResult;
+  processingDimension?: ProcessingDimensionResult;
+  allergensDimension?: AllergensDimensionResult;
   productId?: string;
   savedToDb: boolean;
   totalProcessingTime: number;
@@ -268,6 +305,190 @@ export async function POST(request: NextRequest) {
       };
     }
 
+    // HEALTH DIMENSION ANALYSIS: Run if both ingredients and nutrition were found
+    let healthDimension: HealthDimensionResult | undefined;
+    
+    if (steps.ingredients.status === 'success' && steps.nutrition.status === 'success') {
+      try {
+        console.log('[Test All API] 🏥 Running health dimension analysis');
+        const healthStart = Date.now();
+
+        const healthPrompt = getDimensionPrompt('health');
+        
+        const healthResult = await gemini.generateContent({
+          prompt: healthPrompt,
+          imageData: base64Data,
+          imageMimeType: 'image/jpeg',
+          maxRetries: 2,
+          retryDelayMs: 5000,
+        });
+
+        if (healthResult.success && healthResult.text) {
+          let healthResponseText = healthResult.text.trim();
+          
+          // Remove markdown code blocks
+          if (healthResponseText.includes('```json')) {
+            healthResponseText = healthResponseText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+          }
+          
+          // Extract JSON from text that might have conversational prefix/suffix
+          // Look for JSON object pattern: starts with { and ends with }
+          const jsonMatch = healthResponseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            healthResponseText = jsonMatch[0];
+          }
+
+          const healthData = JSON.parse(healthResponseText);
+          healthDimension = {
+            score: healthData.score,
+            explanation: healthData.explanation,
+            key_factors: healthData.key_factors,
+            confidence: healthData.confidence,
+          };
+
+          const healthTime = Date.now() - healthStart;
+          console.log('[Test All API] ✅ Health dimension analysis completed in', healthTime, 'ms');
+          console.log('[Test All API] 🏥 Health score:', healthDimension.score);
+
+          // Store in product metadata
+          productData.metadata.health_dimension = healthDimension;
+        } else {
+          console.error('[Test All API] ❌ Health dimension analysis failed:', healthResult.error);
+        }
+      } catch (healthError) {
+        console.error('[Test All API] ❌ Health dimension error:', healthError);
+        // Don't fail the entire request if health dimension fails
+      }
+    } else {
+      console.log('[Test All API] ⏭️ Skipping health dimension (missing ingredients or nutrition)');
+    }
+
+    // PROCESSING DIMENSION ANALYSIS: Run if ingredients were found
+    let processingDimension: ProcessingDimensionResult | undefined;
+    
+    if (steps.ingredients.status === 'success') {
+      try {
+        console.log('[Test All API] 🔬 Running processing dimension analysis');
+        const processingStart = Date.now();
+
+        const processingPrompt = getDimensionPrompt('processing');
+        
+        const processingResult = await gemini.generateContent({
+          prompt: processingPrompt,
+          imageData: base64Data,
+          imageMimeType: 'image/jpeg',
+          maxRetries: 2,
+          retryDelayMs: 5000,
+        });
+
+        if (processingResult.success && processingResult.text) {
+          let processingResponseText = processingResult.text.trim();
+          
+          // Remove markdown code blocks
+          if (processingResponseText.includes('```json')) {
+            processingResponseText = processingResponseText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+          }
+          
+          // Extract JSON from text that might have conversational prefix/suffix
+          const jsonMatch = processingResponseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            processingResponseText = jsonMatch[0];
+          }
+
+          const processingData = JSON.parse(processingResponseText);
+          processingDimension = {
+            score: processingData.score,
+            explanation: processingData.explanation,
+            key_factors: processingData.key_factors,
+            additives_detected: processingData.additives_detected || {
+              preservatives: [],
+              artificial_sweeteners: [],
+              artificial_colors: [],
+              other_additives: [],
+            },
+            confidence: processingData.confidence,
+          };
+
+          const processingTime = Date.now() - processingStart;
+          console.log('[Test All API] ✅ Processing dimension analysis completed in', processingTime, 'ms');
+          console.log('[Test All API] 🔬 Processing score:', processingDimension.score);
+
+          // Store in product metadata
+          productData.metadata.processing_dimension = processingDimension;
+        } else {
+          console.error('[Test All API] ❌ Processing dimension analysis failed:', processingResult.error);
+        }
+      } catch (processingError) {
+        console.error('[Test All API] ❌ Processing dimension error:', processingError);
+        // Don't fail the entire request if processing dimension fails
+      }
+    } else {
+      console.log('[Test All API] ⏭️ Skipping processing dimension (missing ingredients)');
+    }
+
+    // ALLERGENS DIMENSION ANALYSIS: Run if ingredients were found
+    let allergensDimension: AllergensDimensionResult | undefined;
+    
+    if (steps.ingredients.status === 'success') {
+      try {
+        console.log('[Test All API] 🥜 Running allergens dimension analysis');
+        const allergensStart = Date.now();
+
+        const allergensPrompt = getDimensionPrompt('allergens');
+        
+        const allergensResult = await gemini.generateContent({
+          prompt: allergensPrompt,
+          imageData: base64Data,
+          imageMimeType: 'image/jpeg',
+          maxRetries: 2,
+          retryDelayMs: 5000,
+        });
+
+        if (allergensResult.success && allergensResult.text) {
+          let allergensResponseText = allergensResult.text.trim();
+          
+          // Remove markdown code blocks
+          if (allergensResponseText.includes('```json')) {
+            allergensResponseText = allergensResponseText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+          }
+          
+          // Extract JSON from text that might have conversational prefix/suffix
+          const jsonMatch = allergensResponseText.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            allergensResponseText = jsonMatch[0];
+          }
+
+          const allergensData = JSON.parse(allergensResponseText);
+          allergensDimension = {
+            score: allergensData.score,
+            explanation: allergensData.explanation,
+            key_factors: allergensData.key_factors,
+            allergens_detected: allergensData.allergens_detected || {
+              major_allergens: [],
+              other_allergens: [],
+              cross_contamination_warnings: [],
+              allergen_free_claims: [],
+            },
+            confidence: allergensData.confidence,
+          };
+
+          const allergensTime = Date.now() - allergensStart;
+          console.log('[Test All API] ✅ Allergens dimension analysis completed in', allergensTime, 'ms');
+          console.log('[Test All API] 🥜 Allergens score:', allergensDimension.score);
+
+          // Store in product metadata
+          productData.metadata.allergens_dimension = allergensDimension;
+        } else {
+          console.error('[Test All API] ❌ Allergens dimension analysis failed:', allergensResult.error);
+        }
+      } catch (allergensError) {
+        console.error('[Test All API] ❌ Allergens dimension error:', allergensError);
+        // Don't fail the entire request if allergens dimension fails
+      }
+    } else {
+      console.log('[Test All API] ⏭️ Skipping allergens dimension (missing ingredients)');
+    }
+
     // Save to database
     let savedToDb = false;
     let productId: string | undefined;
@@ -295,6 +516,9 @@ export async function POST(request: NextRequest) {
     const response: AllExtractionResponse = {
       success: true,
       steps,
+      healthDimension,
+      processingDimension,
+      allergensDimension,
       productId,
       savedToDb,
       totalProcessingTime,

@@ -24,6 +24,39 @@ interface ExtractionStep {
   processingTime?: number;
 }
 
+interface HealthDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  confidence: number;
+}
+
+interface ProcessingDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  additives_detected: {
+    preservatives: string[];
+    artificial_sweeteners: string[];
+    artificial_colors: string[];
+    other_additives: string[];
+  };
+  confidence: number;
+}
+
+interface AllergensDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  allergens_detected: {
+    major_allergens: string[];
+    other_allergens: string[];
+    cross_contamination_warnings: string[];
+    allergen_free_claims: string[];
+  };
+  confidence: number;
+}
+
 interface AllExtractionResult {
   steps: {
     barcode: ExtractionStep;
@@ -31,6 +64,9 @@ interface AllExtractionResult {
     ingredients: ExtractionStep;
     nutrition: ExtractionStep;
   };
+  healthDimension?: HealthDimensionResult;
+  processingDimension?: ProcessingDimensionResult;
+  allergensDimension?: AllergensDimensionResult;
   productId?: string;
   savedToDb: boolean;
   totalProcessingTime: number;
@@ -90,6 +126,9 @@ export default function TestAllPage() {
       
       const extractionResult: AllExtractionResult = {
         steps: data.steps,
+        healthDimension: data.healthDimension,
+        processingDimension: data.processingDimension,
+        allergensDimension: data.allergensDimension,
         productId: data.productId,
         savedToDb: data.savedToDb,
         totalProcessingTime: processingTime,
@@ -136,6 +175,24 @@ export default function TestAllPage() {
     }
   };
 
+  const getHealthScoreColor = (score: number) => {
+    if (score >= 80) return 'text-green-600 bg-green-50';
+    if (score >= 60) return 'text-yellow-600 bg-yellow-50';
+    if (score >= 40) return 'text-orange-600 bg-orange-50';
+    return 'text-red-600 bg-red-50';
+  };
+
+  const getHealthScoreLabel = (score: number) => {
+    if (score >= 90) return 'Excellent';
+    if (score >= 80) return 'Very Good';
+    if (score >= 70) return 'Good';
+    if (score >= 60) return 'Fair';
+    if (score >= 50) return 'Below Average';
+    if (score >= 40) return 'Poor';
+    if (score >= 30) return 'Very Poor';
+    return 'Extremely Poor';
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4">
       <div className="max-w-2xl mx-auto">
@@ -157,17 +214,20 @@ export default function TestAllPage() {
               <li>Click "Start Complete Scan" button below</li>
               <li>Capture ONE image showing the product</li>
               <li>System will extract all information from this single image</li>
-              <li>Wait for all extraction steps to complete (~20-25 seconds)</li>
-              <li>Review results for each extraction type</li>
+              <li>If ingredients and nutrition are found, health dimension analysis will run automatically</li>
+              <li>If ingredients are found, processing and allergens dimension analysis will run automatically</li>
+              <li>Review results for each extraction type and dimension scores</li>
             </ol>
             <div className="mt-3 p-3 bg-blue-100 rounded">
               <p className="text-xs text-blue-900 font-medium mb-2">
                 💡 Best practices:
               </p>
               <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
-                <li>Capture image with barcode, product name, and nutrition label visible</li>
+                <li>Capture image with barcode, product name, ingredients, and nutrition label visible</li>
                 <li>Good lighting and focus are critical</li>
-                <li>System includes 5-second delays between steps to avoid rate limits</li>
+                <li>Health dimension analyzes nutritional value (0-100 score)</li>
+                <li>Processing dimension detects preservatives, artificial additives, and processing level</li>
+                <li>Allergens dimension identifies major allergens and cross-contamination risks</li>
                 <li>If one extraction fails, others will still proceed</li>
               </ul>
             </div>
@@ -391,7 +451,7 @@ export default function TestAllPage() {
 
               {/* Nutrition Results */}
               {result.steps.nutrition.status === 'success' && result.steps.nutrition.data && (
-                <div className="mb-6">
+                <div className="mb-6 pb-6 border-b">
                   <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
                     <span>📊</span>
                     Nutrition Facts
@@ -442,6 +502,322 @@ export default function TestAllPage() {
                       </div>
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Health Dimension Results */}
+              {result.healthDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🏥</span>
+                    Health Dimension Analysis
+                  </h4>
+                  
+                  {/* Health Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.healthDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Health Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.healthDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.healthDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.healthDimension.score >= 80 ? 'bg-green-500' :
+                          result.healthDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.healthDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.healthDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.healthDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.healthDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.healthDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Processing Dimension Results */}
+              {result.processingDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🔬</span>
+                    Processing Dimension Analysis
+                  </h4>
+                  
+                  {/* Processing Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.processingDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Processing Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.processingDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.processingDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.processingDimension.score >= 80 ? 'bg-green-500' :
+                          result.processingDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.processingDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.processingDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.processingDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.processingDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Additives Detected */}
+                  {(result.processingDimension.additives_detected.preservatives.length > 0 ||
+                    result.processingDimension.additives_detected.artificial_sweeteners.length > 0 ||
+                    result.processingDimension.additives_detected.artificial_colors.length > 0 ||
+                    result.processingDimension.additives_detected.other_additives.length > 0) && (
+                    <div className="bg-red-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-red-900 mb-3">⚠️ Additives Detected</p>
+                      
+                      {result.processingDimension.additives_detected.preservatives.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Preservatives:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.preservatives.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.artificial_sweeteners.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Artificial Sweeteners:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.artificial_sweeteners.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.artificial_colors.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Artificial Colors:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.artificial_colors.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.other_additives.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-red-800 mb-1">Other Additives:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.other_additives.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.processingDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Allergens Dimension Results */}
+              {result.allergensDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🥜</span>
+                    Allergens Dimension Analysis
+                  </h4>
+                  
+                  {/* Allergens Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.allergensDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Allergen Safety Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.allergensDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.allergensDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.allergensDimension.score >= 80 ? 'bg-green-500' :
+                          result.allergensDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.allergensDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.allergensDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.allergensDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.allergensDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Major Allergens Detected */}
+                  {result.allergensDimension.allergens_detected.major_allergens.length > 0 && (
+                    <div className="bg-red-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-red-900 mb-3">⚠️ Major Allergens Present</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.major_allergens.map((allergen, index) => (
+                          <span key={index} className="px-3 py-1 bg-red-600 text-white rounded-full text-sm font-medium">
+                            {allergen}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Other Allergens */}
+                  {result.allergensDimension.allergens_detected.other_allergens.length > 0 && (
+                    <div className="bg-orange-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-orange-900 mb-3">Other Allergens</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.other_allergens.map((allergen, index) => (
+                          <span key={index} className="px-3 py-1 bg-orange-200 text-orange-900 rounded-full text-sm">
+                            {allergen}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cross-Contamination Warnings */}
+                  {result.allergensDimension.allergens_detected.cross_contamination_warnings.length > 0 && (
+                    <div className="bg-yellow-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-yellow-900 mb-2">⚠️ Cross-Contamination Warnings</p>
+                      <ul className="space-y-1">
+                        {result.allergensDimension.allergens_detected.cross_contamination_warnings.map((warning, index) => (
+                          <li key={index} className="text-sm text-yellow-800">
+                            • {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Allergen-Free Claims */}
+                  {result.allergensDimension.allergens_detected.allergen_free_claims.length > 0 && (
+                    <div className="bg-green-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-green-900 mb-3">✓ Allergen-Free Claims</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.allergen_free_claims.map((claim, index) => (
+                          <span key={index} className="px-3 py-1 bg-green-200 text-green-900 rounded-full text-sm">
+                            {claim}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.allergensDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
                 </div>
               )}
 
