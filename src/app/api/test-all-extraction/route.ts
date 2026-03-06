@@ -10,7 +10,8 @@
  * 4. Nutrition facts
  * 
  * Uses Vertex AI with automatic retry logic.
- * Saves complete product to products_dev table.
+ * Saves complete product to production products table.
+ * Caches to MongoDB only if extraction is complete (all 4 steps successful).
  */
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -18,6 +19,8 @@ import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
 import { combineExtractionPrompts } from '@/lib/prompts/extraction-prompts';
 import { getDimensionPrompt } from '@/lib/prompts/dimension-prompts';
+import { cacheService } from '@/lib/mongodb/cache-service';
+import type { ProductData } from '@/lib/types/multi-tier';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -72,6 +75,8 @@ interface AllergensDimensionResult {
 
 interface AllExtractionResponse {
   success: boolean;
+  cached?: boolean;
+  cacheAge?: number;
   steps: {
     barcode: ExtractionStep;
     packaging: ExtractionStep;
@@ -201,14 +206,56 @@ export async function POST(request: NextRequest) {
       console.log('[Test All API] ✅ Combined extraction completed in', extractionTime, 'ms');
 
       // Process barcode
+      let extractedBarcode: string | null = null;
       if (extractedData.barcode) {
         const barcodeMatch = extractedData.barcode.match(/\b\d{8,14}\b/);
         if (barcodeMatch) {
-          productData.barcode = barcodeMatch[0];
+          extractedBarcode = barcodeMatch[0];
+          productData.barcode = extractedBarcode;
           steps.barcode.status = 'success';
-          steps.barcode.data = { barcode: barcodeMatch[0] };
+          steps.barcode.data = { barcode: extractedBarcode };
           steps.barcode.confidence = 0.9;
-          console.log('[Test All API] ✅ Barcode found:', barcodeMatch[0]);
+          console.log('[Test All API] ✅ Barcode found:', extractedBarcode);
+
+          // CHECK CACHE: Look for existing product with this barcode
+          try {
+            const { data: cachedProduct, error: cacheError } = await supabase
+              .from('products')
+              .select('*')
+              .eq('barcode', extractedBarcode)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            if (!cacheError && cachedProduct) {
+              const cacheAge = Date.now() - new Date(cachedProduct.created_at).getTime();
+              const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+
+              if (cacheAge < thirtyDaysMs) {
+                console.log('[Test All API] 💾 Cache hit! Using cached product:', cachedProduct.id);
+                console.log('[Test All API] 📅 Cache age:', Math.floor(cacheAge / (24 * 60 * 60 * 1000)), 'days');
+
+                // Return cached data
+                const totalProcessingTime = Date.now() - startTime;
+                return NextResponse.json({
+                  success: true,
+                  cached: true,
+                  cacheAge: Math.floor(cacheAge / (24 * 60 * 60 * 1000)),
+                  steps: cachedProduct.metadata?.extraction_steps || steps,
+                  healthDimension: cachedProduct.metadata?.health_dimension,
+                  processingDimension: cachedProduct.metadata?.processing_dimension,
+                  allergensDimension: cachedProduct.metadata?.allergens_dimension,
+                  productId: cachedProduct.id,
+                  savedToDb: true,
+                  totalProcessingTime,
+                });
+              } else {
+                console.log('[Test All API] ⏰ Cache expired (age:', Math.floor(cacheAge / (24 * 60 * 60 * 1000)), 'days), running fresh analysis');
+              }
+            }
+          } catch (cacheError) {
+            console.log('[Test All API] ⚠️ Cache lookup failed, continuing with fresh extraction:', cacheError);
+          }
         } else {
           steps.barcode.status = 'failed';
           steps.barcode.error = 'No valid barcode detected';
@@ -489,26 +536,134 @@ export async function POST(request: NextRequest) {
       console.log('[Test All API] ⏭️ Skipping allergens dimension (missing ingredients)');
     }
 
-    // Save to database
+    // Save to database (upsert based on barcode)
     let savedToDb = false;
     let productId: string | undefined;
 
     try {
-      const { data, error: dbError } = await supabase
-        .from('products_dev')
-        .insert(productData)
-        .select('id')
-        .single();
+      if (productData.barcode) {
+        // Check if product with this barcode already exists
+        const { data: existingProduct } = await supabase
+          .from('products')
+          .select('id')
+          .eq('barcode', productData.barcode)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
 
-      if (dbError) {
-        console.error('[Test All API] ❌ Database save failed:', dbError);
+        if (existingProduct) {
+          // Update existing entry
+          console.log('[Test All API] 🔄 Updating existing product:', existingProduct.id);
+          
+          const { data, error: updateError } = await supabase
+            .from('products')
+            .update({
+              ...productData,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingProduct.id)
+            .select('id')
+            .single();
+
+          if (updateError) {
+            console.error('[Test All API] ❌ Database update failed:', updateError);
+          } else {
+            savedToDb = true;
+            productId = data.id;
+            console.log('[Test All API] 💾 Updated products:', productId);
+          }
+        } else {
+          // Insert new entry
+          console.log('[Test All API] ➕ Creating new product entry');
+          
+          const { data, error: insertError } = await supabase
+            .from('products')
+            .insert(productData)
+            .select('id')
+            .single();
+
+          if (insertError) {
+            console.error('[Test All API] ❌ Database insert failed:', insertError);
+          } else {
+            savedToDb = true;
+            productId = data.id;
+            console.log('[Test All API] 💾 Inserted to products:', productId);
+          }
+        }
       } else {
-        savedToDb = true;
-        productId = data.id;
-        console.log('[Test All API] 💾 Saved to products_dev:', productId);
+        // No barcode - always insert new entry
+        console.log('[Test All API] ➕ Creating new product entry (no barcode)');
+        
+        const { data, error: insertError } = await supabase
+          .from('products')
+          .insert(productData)
+          .select('id')
+          .single();
+
+        if (insertError) {
+          console.error('[Test All API] ❌ Database insert failed:', insertError);
+        } else {
+          savedToDb = true;
+          productId = data.id;
+          console.log('[Test All API] 💾 Inserted to products:', productId);
+        }
       }
     } catch (dbError) {
       console.error('[Test All API] ❌ Database error:', dbError);
+    }
+
+    // Save to MongoDB cache (only if extraction is COMPLETE)
+    // This prevents incomplete data from polluting the cache
+    const isCompleteExtraction = 
+      productData.barcode &&
+      steps.barcode.status === 'success' &&
+      steps.packaging.status === 'success' &&
+      steps.ingredients.status === 'success' &&
+      steps.nutrition.status === 'success';
+
+    if (savedToDb && productId && isCompleteExtraction) {
+      try {
+        console.log('[Test All API] 💾 Storing in MongoDB cache (complete extraction)...');
+        
+        // Convert productData to ProductData format for cache
+        const cacheProductData: ProductData = {
+          id: productId,
+          barcode: productData.barcode!,
+          name: productData.name || 'Unknown Product',
+          brand: productData.brand || 'Unknown Brand',
+          size: productData.size || undefined,
+          category: productData.category || 'Uncategorized',
+          imageUrl: productData.image_url || undefined,
+          metadata: {
+            ...productData.metadata,
+            ingredients: productData.ingredients,
+            nutrition_facts: productData.nutrition_facts,
+            extraction_source: 'test-all-page',
+          },
+        };
+
+        // Store by barcode with tier 1 (test extraction) and high confidence
+        await cacheService.store(
+          productData.barcode!,
+          'barcode',
+          cacheProductData,
+          1, // Tier 1 (direct extraction)
+          0.9 // High confidence for test extractions
+        );
+
+        console.log('[Test All API] ✅ Stored in MongoDB cache');
+      } catch (cacheError) {
+        console.error('[Test All API] ⚠️ MongoDB cache storage failed:', cacheError);
+        // Don't fail the request if cache storage fails
+      }
+    } else if (savedToDb && productId && productData.barcode) {
+      console.log('[Test All API] ⏭️ Skipping MongoDB cache (incomplete extraction)');
+      console.log('[Test All API] 📊 Extraction status:', {
+        barcode: steps.barcode.status,
+        packaging: steps.packaging.status,
+        ingredients: steps.ingredients.status,
+        nutrition: steps.nutrition.status,
+      });
     }
 
     const totalProcessingTime = Date.now() - startTime;

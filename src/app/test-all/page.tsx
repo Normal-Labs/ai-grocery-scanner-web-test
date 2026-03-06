@@ -58,6 +58,8 @@ interface AllergensDimensionResult {
 }
 
 interface AllExtractionResult {
+  cached?: boolean;
+  cacheAge?: number;
   steps: {
     barcode: ExtractionStep;
     packaging: ExtractionStep;
@@ -125,6 +127,8 @@ export default function TestAllPage() {
       const data = await response.json();
       
       const extractionResult: AllExtractionResult = {
+        cached: data.cached,
+        cacheAge: data.cacheAge,
         steps: data.steps,
         healthDimension: data.healthDimension,
         processingDimension: data.processingDimension,
@@ -308,11 +312,18 @@ export default function TestAllPage() {
                 <h2 className="text-xl font-bold text-gray-900">
                   Extraction Complete
                 </h2>
-                {result.savedToDb && (
-                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                    💾 Saved to DB
-                  </span>
-                )}
+                <div className="flex gap-2">
+                  {result.cached && (
+                    <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                      ⚡ Cached ({result.cacheAge} days old)
+                    </span>
+                  )}
+                  {result.savedToDb && (
+                    <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                      💾 Saved to DB
+                    </span>
+                  )}
+                </div>
               </div>
 
               {/* Overall Metrics */}
