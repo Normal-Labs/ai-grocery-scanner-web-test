@@ -14,9 +14,10 @@ interface ImageScannerProps {
   onError?: (error: string) => void;
   onClose?: () => void;
   scanType?: 'barcode' | 'packaging' | 'ingredients' | 'nutrition facts';
+  instruction?: string; // Custom instruction text
 }
 
-export default function ImageScanner({ onScanComplete, onError, onClose, scanType = 'packaging' }: ImageScannerProps) {
+export default function ImageScanner({ onScanComplete, onError, onClose, scanType = 'packaging', instruction }: ImageScannerProps) {
   const [isScanning, setIsScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -218,7 +219,7 @@ export default function ImageScanner({ onScanComplete, onError, onClose, scanTyp
             <div className="p-6 bg-gradient-to-t from-black via-black/80 to-transparent">
               {/* Instruction text */}
               <p className="text-center text-white text-base mb-4 font-medium">
-                Point camera at {scanType} and take a picture
+                {instruction || `Point camera at ${scanType} and take a picture`}
               </p>
 
               {/* Action buttons */}

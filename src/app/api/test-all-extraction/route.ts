@@ -27,8 +27,45 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+/**
+ * Calculate completeness score for a product entry
+ * Returns a score from 0-4 based on successful extraction steps
+ */
+function calculateCompletenessScore(data: any): number {
+  let score = 0;
+  
+  // Check extraction steps in metadata
+  const steps = data.metadata?.extraction_steps;
+  if (!steps) return 0;
+  
+  if (steps.barcode?.status === 'success') score++;
+  if (steps.packaging?.status === 'success') score++;
+  if (steps.ingredients?.status === 'success') score++;
+  if (steps.nutrition?.status === 'success') score++;
+  
+  return score;
+}
+
+/**
+ * Determine if new data should replace existing data
+ * Returns true if new data is equal or better quality
+ */
+function shouldUpdateProduct(existingData: any, newData: any): boolean {
+  const existingScore = calculateCompletenessScore(existingData);
+  const newScore = calculateCompletenessScore(newData);
+  
+  console.log('[Test All API] 📊 Completeness comparison:', {
+    existing: existingScore,
+    new: newScore,
+    shouldUpdate: newScore >= existingScore,
+  });
+  
+  return newScore >= existingScore;
+}
+
 interface AllExtractionRequest {
   image: string; // base64 image data
+  productId?: string; // Optional: ID of product to update (for completing incomplete scans)
 }
 
 interface ExtractionStep {
@@ -77,6 +114,8 @@ interface AllExtractionResponse {
   success: boolean;
   cached?: boolean;
   cacheAge?: number;
+  skippedUpdate?: boolean;
+  reason?: string;
   steps: {
     barcode: ExtractionStep;
     packaging: ExtractionStep;
@@ -104,7 +143,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: AllExtractionRequest = await request.json();
-    const { image } = body;
+    const { image, productId } = body;
 
     if (!image) {
       return NextResponse.json(
@@ -120,6 +159,9 @@ export async function POST(request: NextRequest) {
     }
 
     console.log('[Test All API] 📥 Starting complete extraction (single API call)');
+    if (productId) {
+      console.log('[Test All API] 🔄 Completing scan for existing product:', productId);
+    }
 
     // Strip data URL prefix if present
     let base64Data = image;
@@ -230,10 +272,15 @@ export async function POST(request: NextRequest) {
             if (!cacheError && cachedProduct) {
               const cacheAge = Date.now() - new Date(cachedProduct.created_at).getTime();
               const thirtyDaysMs = 30 * 24 * 60 * 60 * 1000;
+              
+              // Check if cached data is complete (score 4)
+              const cachedScore = calculateCompletenessScore(cachedProduct);
+              const isComplete = cachedScore === 4;
 
-              if (cacheAge < thirtyDaysMs) {
+              if (cacheAge < thirtyDaysMs && isComplete) {
                 console.log('[Test All API] 💾 Cache hit! Using cached product:', cachedProduct.id);
                 console.log('[Test All API] 📅 Cache age:', Math.floor(cacheAge / (24 * 60 * 60 * 1000)), 'days');
+                console.log('[Test All API] 📊 Cached completeness score:', cachedScore);
 
                 // Return cached data
                 const totalProcessingTime = Date.now() - startTime;
@@ -249,8 +296,10 @@ export async function POST(request: NextRequest) {
                   savedToDb: true,
                   totalProcessingTime,
                 });
-              } else {
+              } else if (cacheAge >= thirtyDaysMs) {
                 console.log('[Test All API] ⏰ Cache expired (age:', Math.floor(cacheAge / (24 * 60 * 60 * 1000)), 'days), running fresh analysis');
+              } else {
+                console.log('[Test All API] ⚠️ Cached data incomplete (score:', cachedScore, '), running fresh analysis');
               }
             }
           } catch (cacheError) {
@@ -269,10 +318,10 @@ export async function POST(request: NextRequest) {
 
       // Process packaging
       if (extractedData.packaging) {
-        productData.name = extractedData.packaging.productName || null;
-        productData.brand = extractedData.packaging.brand || null;
+        productData.name = extractedData.packaging.productName || 'Unknown Product';
+        productData.brand = extractedData.packaging.brand || 'Unknown Brand';
         productData.size = extractedData.packaging.size || null;
-        productData.category = extractedData.packaging.category || null;
+        productData.category = extractedData.packaging.category || 'Uncategorized';
         productData.metadata.packaging_type = extractedData.packaging.packagingType || null;
 
         steps.packaging.status = 'success';
@@ -282,6 +331,10 @@ export async function POST(request: NextRequest) {
       } else {
         steps.packaging.status = 'failed';
         steps.packaging.error = 'No packaging data in response';
+        // Set defaults for required fields
+        productData.name = 'Unknown Product';
+        productData.brand = 'Unknown Brand';
+        productData.category = 'Uncategorized';
       }
       steps.packaging.processingTime = extractionTime;
       productData.metadata.extraction_steps.packaging = steps.packaging;
@@ -536,41 +589,230 @@ export async function POST(request: NextRequest) {
       console.log('[Test All API] ⏭️ Skipping allergens dimension (missing ingredients)');
     }
 
-    // Save to database (upsert based on barcode)
+    // Save to database (upsert based on barcode or productId)
     let savedToDb = false;
-    let productId: string | undefined;
+    let finalProductId: string | undefined;
 
     try {
-      if (productData.barcode) {
-        // Check if product with this barcode already exists
-        const { data: existingProduct } = await supabase
+      // If productId is provided, we're completing an incomplete scan
+      if (productId) {
+        console.log('[Test All API] 🔄 Updating existing product:', productId);
+        
+        // Fetch existing product
+        const { data: existingProduct, error: fetchError } = await supabase
           .from('products')
-          .select('id')
-          .eq('barcode', productData.barcode)
-          .order('created_at', { ascending: false })
-          .limit(1)
+          .select('*')
+          .eq('id', productId)
           .single();
 
-        if (existingProduct) {
-          // Update existing entry
-          console.log('[Test All API] 🔄 Updating existing product:', existingProduct.id);
+        if (fetchError || !existingProduct) {
+          console.error('[Test All API] ❌ Failed to fetch existing product:', fetchError);
+          console.log('[Test All API] ⚠️ Product not found, will create new entry instead');
+          // Fall through to normal insert logic (don't use productId anymore)
+        } else {
+          // Merge new data with existing data (keep existing data where new data is null)
+          // For extraction_steps, only update if new step is successful
+          const mergedExtractionSteps = { ...existingProduct.metadata?.extraction_steps };
           
+          // Only update extraction steps if the new step is successful
+          if (productData.metadata.extraction_steps.barcode?.status === 'success') {
+            mergedExtractionSteps.barcode = productData.metadata.extraction_steps.barcode;
+          }
+          if (productData.metadata.extraction_steps.packaging?.status === 'success') {
+            mergedExtractionSteps.packaging = productData.metadata.extraction_steps.packaging;
+          }
+          if (productData.metadata.extraction_steps.ingredients?.status === 'success') {
+            mergedExtractionSteps.ingredients = productData.metadata.extraction_steps.ingredients;
+          }
+          if (productData.metadata.extraction_steps.nutrition?.status === 'success') {
+            mergedExtractionSteps.nutrition = productData.metadata.extraction_steps.nutrition;
+          }
+          
+          const mergedData = {
+            barcode: productData.barcode || existingProduct.barcode,
+            name: productData.name || existingProduct.name,
+            brand: productData.brand || existingProduct.brand,
+            size: productData.size || existingProduct.size,
+            category: productData.category || existingProduct.category,
+            ingredients: productData.ingredients || existingProduct.ingredients,
+            nutrition_facts: productData.nutrition_facts || existingProduct.nutrition_facts,
+            metadata: {
+              ...existingProduct.metadata,
+              extraction_type: productData.metadata.extraction_type,
+              extraction_steps: mergedExtractionSteps,
+              // Keep existing dimensions if new ones aren't available
+              health_dimension: productData.metadata.health_dimension || existingProduct.metadata?.health_dimension,
+              processing_dimension: productData.metadata.processing_dimension || existingProduct.metadata?.processing_dimension,
+              allergens_dimension: productData.metadata.allergens_dimension || existingProduct.metadata?.allergens_dimension,
+              // Keep other metadata fields from existing product
+              packaging_type: productData.metadata.packaging_type || existingProduct.metadata?.packaging_type,
+              overall_confidence: productData.metadata.overall_confidence || existingProduct.metadata?.overall_confidence,
+            },
+          };
+
           const { data, error: updateError } = await supabase
             .from('products')
             .update({
-              ...productData,
+              ...mergedData,
               updated_at: new Date().toISOString(),
+              metadata: {
+                ...mergedData.metadata,
+                previous_completeness_score: calculateCompletenessScore(existingProduct),
+                current_completeness_score: calculateCompletenessScore({ metadata: mergedData.metadata }),
+                last_update_reason: 'multi_scan_completion',
+              },
             })
-            .eq('id', existingProduct.id)
-            .select('id')
+            .eq('id', productId)
+            .select('*')
             .single();
 
           if (updateError) {
             console.error('[Test All API] ❌ Database update failed:', updateError);
           } else {
             savedToDb = true;
-            productId = data.id;
-            console.log('[Test All API] 💾 Updated products:', productId);
+            finalProductId = data.id;
+            console.log('[Test All API] 💾 Updated product via multi-scan:', finalProductId);
+            console.log('[Test All API] 📊 Merged extraction steps:', JSON.stringify(data.metadata?.extraction_steps, null, 2));
+            console.log('[Test All API] 🏥 Health dimension:', data.metadata?.health_dimension ? 'Present' : 'Missing');
+            console.log('[Test All API] 🔬 Processing dimension:', data.metadata?.processing_dimension ? 'Present' : 'Missing');
+            console.log('[Test All API] 🥜 Allergens dimension:', data.metadata?.allergens_dimension ? 'Present' : 'Missing');
+            
+            // Check if the merged product is now complete and cache it
+            const mergedSteps = data.metadata?.extraction_steps;
+            const isCompleteExtraction = 
+              data.barcode &&
+              mergedSteps?.barcode?.status === 'success' &&
+              mergedSteps?.packaging?.status === 'success' &&
+              mergedSteps?.ingredients?.status === 'success' &&
+              mergedSteps?.nutrition?.status === 'success';
+
+            if (isCompleteExtraction) {
+              try {
+                console.log('[Test All API] 💾 Storing complete merged product in MongoDB cache...');
+                
+                // Convert to ProductData format for cache
+                const cacheProductData: ProductData = {
+                  id: data.id,
+                  barcode: data.barcode!,
+                  name: data.name || 'Unknown Product',
+                  brand: data.brand || 'Unknown Brand',
+                  size: data.size || undefined,
+                  category: data.category || 'Uncategorized',
+                  imageUrl: data.image_url || undefined,
+                  metadata: {
+                    ...data.metadata,
+                    ingredients: data.ingredients,
+                    nutrition_facts: data.nutrition_facts,
+                    extraction_source: 'test-all-page-multi-scan',
+                  },
+                };
+
+                // Store by barcode with tier 1 (test extraction) and high confidence
+                await cacheService.store(
+                  data.barcode!,
+                  'barcode',
+                  cacheProductData,
+                  1, // Tier 1 (direct extraction)
+                  0.9 // High confidence for test extractions
+                );
+
+                console.log('[Test All API] ✅ Stored complete merged product in MongoDB cache');
+              } catch (cacheError) {
+                console.error('[Test All API] ⚠️ MongoDB cache storage failed:', cacheError);
+                // Don't fail the request if cache storage fails
+              }
+            } else {
+              console.log('[Test All API] ⏭️ Skipping MongoDB cache (merged product still incomplete)');
+              console.log('[Test All API] 📊 Merged extraction status:', {
+                barcode: mergedSteps?.barcode?.status,
+                packaging: mergedSteps?.packaging?.status,
+                ingredients: mergedSteps?.ingredients?.status,
+                nutrition: mergedSteps?.nutrition?.status,
+              });
+            }
+            
+            // Return the complete merged data to the view
+            const totalProcessingTime = Date.now() - startTime;
+            return NextResponse.json({
+              success: true,
+              cached: false,
+              steps: data.metadata?.extraction_steps || steps,
+              healthDimension: data.metadata?.health_dimension,
+              processingDimension: data.metadata?.processing_dimension,
+              allergensDimension: data.metadata?.allergens_dimension,
+              productId: data.id,
+              savedToDb: true,
+              totalProcessingTime,
+            });
+          }
+        }
+      }
+      
+      // Normal flow: check for barcode or insert new
+      if (productData.barcode) {
+        // Check if product with this barcode already exists
+        const { data: existingProduct, error: lookupError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('barcode', productData.barcode)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!lookupError && existingProduct) {
+          // Product exists - check if we should update it
+          console.log('[Test All API] 🔍 Found existing product:', existingProduct.id);
+          
+          if (shouldUpdateProduct(existingProduct, { metadata: productData.metadata })) {
+            // New data is equal or better - update
+            console.log('[Test All API] 🔄 Updating product (new data is equal or better quality)');
+            
+            const { data, error: updateError } = await supabase
+              .from('products')
+              .update({
+                ...productData,
+                updated_at: new Date().toISOString(),
+                metadata: {
+                  ...productData.metadata,
+                  previous_completeness_score: calculateCompletenessScore(existingProduct),
+                  current_completeness_score: calculateCompletenessScore({ metadata: productData.metadata }),
+                  last_update_reason: 'improved_or_equal_quality',
+                },
+              })
+              .eq('id', existingProduct.id)
+              .select('id')
+              .single();
+
+            if (updateError) {
+              console.error('[Test All API] ❌ Database update failed:', updateError);
+            } else {
+              savedToDb = true;
+              finalProductId = data.id;
+              console.log('[Test All API] 💾 Updated products:', finalProductId);
+            }
+          } else {
+            // Existing data is better - skip update
+            console.log('[Test All API] ⏭️ Skipping update (existing data is better quality)');
+            console.log('[Test All API] 📊 Keeping existing product:', existingProduct.id);
+            
+            savedToDb = true;
+            finalProductId = existingProduct.id;
+            
+            // Return existing data as if it was just scanned
+            const totalProcessingTime = Date.now() - startTime;
+            return NextResponse.json({
+              success: true,
+              cached: false,
+              skippedUpdate: true,
+              reason: 'existing_data_better_quality',
+              steps: existingProduct.metadata?.extraction_steps || steps,
+              healthDimension: existingProduct.metadata?.health_dimension,
+              processingDimension: existingProduct.metadata?.processing_dimension,
+              allergensDimension: existingProduct.metadata?.allergens_dimension,
+              productId: existingProduct.id,
+              savedToDb: true,
+              totalProcessingTime,
+            });
           }
         } else {
           // Insert new entry
@@ -578,7 +820,13 @@ export async function POST(request: NextRequest) {
           
           const { data, error: insertError } = await supabase
             .from('products')
-            .insert(productData)
+            .insert({
+              ...productData,
+              metadata: {
+                ...productData.metadata,
+                initial_completeness_score: calculateCompletenessScore({ metadata: productData.metadata }),
+              },
+            })
             .select('id')
             .single();
 
@@ -586,8 +834,8 @@ export async function POST(request: NextRequest) {
             console.error('[Test All API] ❌ Database insert failed:', insertError);
           } else {
             savedToDb = true;
-            productId = data.id;
-            console.log('[Test All API] 💾 Inserted to products:', productId);
+            finalProductId = data.id;
+            console.log('[Test All API] 💾 Inserted to products:', finalProductId);
           }
         }
       } else {
@@ -596,16 +844,24 @@ export async function POST(request: NextRequest) {
         
         const { data, error: insertError } = await supabase
           .from('products')
-          .insert(productData)
+          .insert({
+            ...productData,
+            metadata: {
+              ...productData.metadata,
+              initial_completeness_score: calculateCompletenessScore({ metadata: productData.metadata }),
+            },
+          })
           .select('id')
           .single();
 
         if (insertError) {
           console.error('[Test All API] ❌ Database insert failed:', insertError);
+          console.error('[Test All API] 📋 Failed data:', { name: productData.name, brand: productData.brand, barcode: productData.barcode });
+          // Don't set finalProductId - save failed
         } else {
           savedToDb = true;
-          productId = data.id;
-          console.log('[Test All API] 💾 Inserted to products:', productId);
+          finalProductId = data.id;
+          console.log('[Test All API] 💾 Inserted to products:', finalProductId);
         }
       }
     } catch (dbError) {
@@ -621,13 +877,13 @@ export async function POST(request: NextRequest) {
       steps.ingredients.status === 'success' &&
       steps.nutrition.status === 'success';
 
-    if (savedToDb && productId && isCompleteExtraction) {
+    if (savedToDb && finalProductId && isCompleteExtraction) {
       try {
         console.log('[Test All API] 💾 Storing in MongoDB cache (complete extraction)...');
         
         // Convert productData to ProductData format for cache
         const cacheProductData: ProductData = {
-          id: productId,
+          id: finalProductId,
           barcode: productData.barcode!,
           name: productData.name || 'Unknown Product',
           brand: productData.brand || 'Unknown Brand',
@@ -656,7 +912,7 @@ export async function POST(request: NextRequest) {
         console.error('[Test All API] ⚠️ MongoDB cache storage failed:', cacheError);
         // Don't fail the request if cache storage fails
       }
-    } else if (savedToDb && productId && productData.barcode) {
+    } else if (savedToDb && finalProductId && productData.barcode) {
       console.log('[Test All API] ⏭️ Skipping MongoDB cache (incomplete extraction)');
       console.log('[Test All API] 📊 Extraction status:', {
         barcode: steps.barcode.status,
@@ -674,7 +930,7 @@ export async function POST(request: NextRequest) {
       healthDimension,
       processingDimension,
       allergensDimension,
-      productId,
+      productId: finalProductId,
       savedToDb,
       totalProcessingTime,
     };

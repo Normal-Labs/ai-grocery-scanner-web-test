@@ -12,7 +12,7 @@
  * Shows progress and results for each step.
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ImageScanner from '@/components/ImageScanner';
 
 interface ExtractionStep {
@@ -60,6 +60,8 @@ interface AllergensDimensionResult {
 interface AllExtractionResult {
   cached?: boolean;
   cacheAge?: number;
+  skippedUpdate?: boolean;
+  reason?: string;
   steps: {
     barcode: ExtractionStep;
     packaging: ExtractionStep;
@@ -82,6 +84,70 @@ export default function TestAllPage() {
   const [currentStep, setCurrentStep] = useState<string>('');
   const [result, setResult] = useState<AllExtractionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [incompleteScanProductId, setIncompleteScanProductId] = useState<string | null>(null);
+  const [cameraInstructions, setCameraInstructions] = useState<string>('Point camera at packaging and take a picture');
+
+  // Restore incomplete scan state from localStorage on mount
+  useEffect(() => {
+    const savedProductId = localStorage.getItem('incompleteScanProductId');
+    const savedInstructions = localStorage.getItem('cameraInstructions');
+    
+    if (savedProductId) {
+      setIncompleteScanProductId(savedProductId);
+      console.log('[Test All] 🔄 Restored incomplete scan state:', savedProductId);
+    }
+    
+    if (savedInstructions) {
+      setCameraInstructions(savedInstructions);
+      console.log('[Test All] 📝 Restored camera instructions:', savedInstructions);
+    }
+  }, []);
+
+  // Helper function to determine missing extraction steps
+  const getMissingSteps = (steps: AllExtractionResult['steps']): string[] => {
+    const missing: string[] = [];
+    if (steps.barcode.status !== 'success') missing.push('barcode');
+    if (steps.packaging.status !== 'success') missing.push('packaging');
+    if (steps.ingredients.status !== 'success') missing.push('ingredients');
+    if (steps.nutrition.status !== 'success') missing.push('nutrition');
+    return missing;
+  };
+
+  // Helper function to generate camera instructions based on missing steps
+  const generateCameraInstructions = (missingSteps: string[]): string => {
+    if (missingSteps.length === 0) {
+      return 'Point camera at packaging and take a picture';
+    }
+
+    const instructions: string[] = [];
+    
+    if (missingSteps.includes('barcode')) {
+      instructions.push('barcode');
+    }
+    if (missingSteps.includes('nutrition')) {
+      instructions.push('nutrition facts label');
+    }
+    if (missingSteps.includes('ingredients')) {
+      instructions.push('ingredients list');
+    }
+    if (missingSteps.includes('packaging')) {
+      instructions.push('product name and brand');
+    }
+
+    if (instructions.length === 1) {
+      return `Point camera at ${instructions[0]} and take a picture`;
+    } else if (instructions.length === 2) {
+      return `Point camera at ${instructions[0]} and ${instructions[1]} and take a picture`;
+    } else {
+      const last = instructions.pop();
+      return `Point camera at ${instructions.join(', ')}, and ${last} and take a picture`;
+    }
+  };
+
+  // Helper function to check if scan is incomplete
+  const isIncomplete = (steps: AllExtractionResult['steps']): boolean => {
+    return getMissingSteps(steps).length > 0;
+  };
 
   const handleScanComplete = async (scanData: {
     image?: string;
@@ -106,15 +172,23 @@ export default function TestAllPage() {
       // Calculate image size
       const imageSize = Math.round((scanData.image.length * 3) / 4);
       
+      // Prepare request body - include productId if completing an incomplete scan
+      const requestBody: any = {
+        image: scanData.image,
+      };
+      
+      if (incompleteScanProductId) {
+        requestBody.productId = incompleteScanProductId;
+        console.log('[Test All] 🔄 Completing scan for product:', incompleteScanProductId);
+      }
+      
       // Call test API endpoint
       const response = await fetch('/api/test-all-extraction', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          image: scanData.image,
-        }),
+        body: JSON.stringify(requestBody),
       });
       
       const processingTime = Date.now() - startTime;
@@ -129,6 +203,8 @@ export default function TestAllPage() {
       const extractionResult: AllExtractionResult = {
         cached: data.cached,
         cacheAge: data.cacheAge,
+        skippedUpdate: data.skippedUpdate,
+        reason: data.reason,
         steps: data.steps,
         healthDimension: data.healthDimension,
         processingDimension: data.processingDimension,
@@ -142,6 +218,39 @@ export default function TestAllPage() {
       
       setResult(extractionResult);
       setCurrentStep('');
+      
+      // Check if scan is incomplete and track productId
+      if (extractionResult.productId && isIncomplete(extractionResult.steps)) {
+        setIncompleteScanProductId(extractionResult.productId);
+        const missing = getMissingSteps(extractionResult.steps);
+        const instructions = generateCameraInstructions(missing);
+        setCameraInstructions(instructions);
+        
+        // Persist to localStorage for page refresh
+        localStorage.setItem('incompleteScanProductId', extractionResult.productId);
+        localStorage.setItem('cameraInstructions', instructions);
+        
+        console.log('[Test All] ⚠️ Incomplete scan detected. Missing:', missing);
+        console.log('[Test All] 📝 Camera instructions:', instructions);
+        console.log('[Test All] 💾 Stored productId in state and localStorage:', extractionResult.productId);
+      } else if (extractionResult.productId && !isIncomplete(extractionResult.steps)) {
+        // Scan is complete, clear incomplete state
+        setIncompleteScanProductId(null);
+        setCameraInstructions('Point camera at packaging and take a picture');
+        localStorage.removeItem('incompleteScanProductId');
+        localStorage.removeItem('cameraInstructions');
+        console.log('[Test All] ✅ Complete scan achieved');
+      } else if (!extractionResult.productId && isIncomplete(extractionResult.steps)) {
+        // Incomplete scan but no productId (save failed)
+        console.log('[Test All] ⚠️ Incomplete scan but no productId - save may have failed');
+        console.log('[Test All] 💡 User can try scanning again to save the product');
+        // Don't set incomplete state since we can't update a non-existent product
+        setIncompleteScanProductId(null);
+        localStorage.removeItem('incompleteScanProductId');
+        localStorage.removeItem('cameraInstructions');
+      } else if (!extractionResult.productId) {
+        console.log('[Test All] ⚠️ No productId returned from API - save may have failed');
+      }
       
       console.log('[Test All] ✅ Extraction complete:', extractionResult);
       
@@ -318,13 +427,37 @@ export default function TestAllPage() {
                       ⚡ Cached ({result.cacheAge} days old)
                     </span>
                   )}
-                  {result.savedToDb && (
+                  {result.skippedUpdate && (
+                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                      🛡️ Existing Data Preserved
+                    </span>
+                  )}
+                  {result.savedToDb && !result.skippedUpdate && !result.cached && (
                     <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
                       💾 Saved to DB
                     </span>
                   )}
                 </div>
               </div>
+
+              {/* Skipped Update Notice */}
+              {result.skippedUpdate && (
+                <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl">ℹ️</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-yellow-900 mb-1">
+                        Update Skipped - Existing Data is Better Quality
+                      </p>
+                      <p className="text-xs text-yellow-800">
+                        This product already exists in the database with more complete information. 
+                        The existing data has been preserved to maintain quality. 
+                        Showing the existing product data below.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* Overall Metrics */}
               <div className="grid grid-cols-2 gap-4 mb-4">
@@ -850,20 +983,62 @@ export default function TestAllPage() {
               )}
             </div>
 
+            {/* Complete Scan Button - shown when extraction is incomplete */}
+            {incompleteScanProductId && result && isIncomplete(result.steps) && (
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg shadow-lg p-4">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-orange-900 mb-1">
+                      Incomplete Scan Detected
+                    </p>
+                    <p className="text-xs text-orange-800">
+                      Some information is missing. Capture another image to complete this product scan.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowScanner(true)}
+                  className="w-full px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors"
+                >
+                  📷 Complete Scan
+                </button>
+              </div>
+            )}
+            {/* Debug: Show button render conditions */}
+            {result && (() => {
+              console.log('[Test All] 🔍 Button render check:', {
+                incompleteScanProductId,
+                hasResult: !!result,
+                isIncomplete: isIncomplete(result.steps),
+                shouldShow: !!(incompleteScanProductId && result && isIncomplete(result.steps))
+              });
+              return null;
+            })()}
+
             {/* Action Buttons */}
-            <div className="flex gap-3">
-              <button
-                onClick={handleReset}
-                className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
-              >
-                Test Another Product
-              </button>
-              <button
-                onClick={() => window.location.href = '/'}
-                className="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors"
-              >
-                Back to Home
-              </button>
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    handleReset();
+                    // Clear incomplete scan state when starting fresh
+                    setIncompleteScanProductId(null);
+                    setCameraInstructions('Point camera at packaging and take a picture');
+                    localStorage.removeItem('incompleteScanProductId');
+                    localStorage.removeItem('cameraInstructions');
+                  }}
+                  className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+                >
+                  Test Another Product
+                </button>
+                <button
+                  onClick={() => window.location.href = '/'}
+                  className="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors"
+                >
+                  Back to Home
+                </button>
+              </div>
             </div>
           </div>
         )}
@@ -873,6 +1048,7 @@ export default function TestAllPage() {
           <div className="fixed inset-0 bg-black z-50 flex flex-col">
             <ImageScanner
               scanType="packaging"
+              instruction={cameraInstructions}
               onScanComplete={handleScanComplete}
               onClose={() => setShowScanner(false)}
               onError={(error) => {
