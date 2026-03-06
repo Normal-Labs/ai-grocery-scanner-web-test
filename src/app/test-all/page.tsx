@@ -101,6 +101,20 @@ export default function TestAllPage() {
       setCameraInstructions(savedInstructions);
       console.log('[Test All] 📝 Restored camera instructions:', savedInstructions);
     }
+
+    // Check if viewing from history
+    const viewHistoryResult = localStorage.getItem('viewHistoryResult');
+    if (viewHistoryResult) {
+      try {
+        const historyResult = JSON.parse(viewHistoryResult);
+        setResult(historyResult);
+        console.log('[Test All] 📜 Loaded result from history');
+        // Clear the flag
+        localStorage.removeItem('viewHistoryResult');
+      } catch (error) {
+        console.error('[Test All] ❌ Failed to load history result:', error);
+      }
+    }
   }, []);
 
   // Helper function to determine missing extraction steps
@@ -147,6 +161,53 @@ export default function TestAllPage() {
   // Helper function to check if scan is incomplete
   const isIncomplete = (steps: AllExtractionResult['steps']): boolean => {
     return getMissingSteps(steps).length > 0;
+  };
+
+  // Helper function to calculate completeness score
+  const calculateCompletenessScore = (steps: AllExtractionResult['steps']): number => {
+    let score = 0;
+    if (steps.barcode.status === 'success') score++;
+    if (steps.packaging.status === 'success') score++;
+    if (steps.ingredients.status === 'success') score++;
+    if (steps.nutrition.status === 'success') score++;
+    return score;
+  };
+
+  // Helper function to save scan to history
+  const saveToHistory = (extractionResult: AllExtractionResult) => {
+    try {
+      // Get product name and brand
+      const name = extractionResult.steps.packaging.data?.productName || 'Unknown Product';
+      const brand = extractionResult.steps.packaging.data?.brand || 'Unknown Brand';
+      const barcode = extractionResult.steps.barcode.data?.barcode;
+
+      const historyItem = {
+        id: Date.now().toString(),
+        productId: extractionResult.productId,
+        barcode,
+        name,
+        brand,
+        timestamp: new Date().toISOString(),
+        completenessScore: calculateCompletenessScore(extractionResult.steps),
+        result: extractionResult,
+      };
+
+      // Get existing history
+      const historyJson = localStorage.getItem('scanHistory');
+      const history = historyJson ? JSON.parse(historyJson) : [];
+
+      // Add new item to beginning
+      history.unshift(historyItem);
+
+      // Keep only last 10 items
+      const trimmedHistory = history.slice(0, 10);
+
+      // Save back to localStorage
+      localStorage.setItem('scanHistory', JSON.stringify(trimmedHistory));
+      console.log('[Test All] 💾 Saved to scan history');
+    } catch (error) {
+      console.error('[Test All] ❌ Failed to save to history:', error);
+    }
   };
 
   const handleScanComplete = async (scanData: {
@@ -221,6 +282,9 @@ export default function TestAllPage() {
       
       setResult(extractionResult);
       setCurrentStep('');
+      
+      // Save to history
+      saveToHistory(extractionResult);
       
       // Check if scan is incomplete and track productId
       if (extractionResult.productId && isIncomplete(extractionResult.steps)) {
@@ -314,9 +378,17 @@ export default function TestAllPage() {
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">
-            🔬 AI Product Analysis
-          </h1>
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="text-2xl font-bold text-gray-900">
+              🔬 AI Product Analysis
+            </h1>
+            <button
+              onClick={() => window.location.href = '/history'}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors text-sm"
+            >
+              📜 History
+            </button>
+          </div>
         </div>
 
         {/* Instructions */}
