@@ -38,6 +38,13 @@ A complete multi-scan workflow that allows users to build complete product recor
 - Missing productId prevents incomplete scan button
 - Comprehensive logging for debugging
 
+### 6. Smooth UX Flow
+- Auto-scroll to top when starting complete scan
+- Button hidden during loading (prevents confusion)
+- Clear visual feedback at each step
+- Mobile-app-like scrolling (no nested scroll areas)
+- Dimension analyses displayed first in results
+
 ## User Flow
 
 ### Scenario: Product with Barcode on Back
@@ -51,15 +58,19 @@ A complete multi-scan workflow that allows users to build complete product recor
 
 **Scan 2 (Back of package)**:
 1. User clicks "Complete Scan"
-2. Camera opens with custom instruction
-3. User captures back showing barcode
-4. System extracts: ✅ barcode, ❌ ingredients, ❌ nutrition
-5. Fetches existing product by productId
-6. Smart merge: Keeps ingredients/nutrition from Scan 1, adds barcode from Scan 2
-7. Merged product is complete (all 4 steps successful)
-8. Updates database
-9. Caches to MongoDB
-10. Shows complete product with all data + dimension analyses
+2. Page scrolls to top automatically
+3. Camera opens with custom instruction
+4. User captures back showing barcode
+5. Scanner closes, page scrolls to top
+6. Loading state visible at top (button hidden)
+7. System extracts: ✅ barcode, ❌ ingredients, ❌ nutrition
+8. Fetches existing product by productId
+9. Smart merge: Keeps ingredients/nutrition from Scan 1, adds barcode from Scan 2
+10. Merged product is complete (all 4 steps successful)
+11. Updates database
+12. Caches to MongoDB
+13. Shows complete product with all data + dimension analyses
+14. Button stays hidden (scan is complete)
 
 **Scan 3 (Same product, weeks later)**:
 1. User scans same barcode
@@ -107,9 +118,12 @@ return NextResponse.json({
 1. **src/app/test-all/page.tsx** (~100 lines added)
    - State management for incomplete scans
    - Helper functions for missing steps and instructions
-   - "Complete Scan" button UI
+   - "Complete Scan" button UI with smart visibility
    - localStorage persistence
+   - Auto-scroll to top on scan start
    - Debug logging
+   - Removed nested scrolling
+   - Reordered results display
 
 2. **src/app/api/test-all-extraction/route.ts** (~150 lines added)
    - productId parameter support
@@ -129,6 +143,8 @@ return NextResponse.json({
 - ✅ Clear guidance on what to capture next
 - ✅ Complete product information from multiple scans
 - ✅ Fast cache hits on repeat scans
+- ✅ Smooth, intuitive flow with auto-scroll
+- ✅ Clean, mobile-app-like interface
 
 ### For System
 - ✅ Higher quality product data
@@ -141,6 +157,7 @@ return NextResponse.json({
 - ✅ Comprehensive logging
 - ✅ Clear separation of concerns
 - ✅ Well-documented behavior
+- ✅ Mobile-first UX design
 
 ## Testing Results
 
@@ -154,6 +171,10 @@ All test scenarios passing:
 - ✅ Invalid productId handled gracefully
 - ✅ Database saves work correctly
 - ✅ View displays complete merged data
+- ✅ Button hidden during loading
+- ✅ Auto-scroll to top works
+- ✅ Mobile-app-like scrolling
+- ✅ Dimension analyses displayed first
 
 ## Performance
 
