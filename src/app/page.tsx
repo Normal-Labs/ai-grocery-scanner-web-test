@@ -1,1735 +1,1163 @@
 'use client';
 
 /**
- * Product Scanning Page
+ * Complete Extraction Test Page
  * 
- * Main user interface for scanning products using the multi-tier system.
- * Integrates barcode detection with image-based fallback.
- * Supports both guided Product Hero mode and progressive capture mode.
+ * Orchestrates all extraction types sequentially:
+ * 1. Barcode detection
+ * 2. Packaging information
+ * 3. Ingredients list
+ * 4. Nutrition facts
  * 
- * Requirements: 14.1, 14.2, 14.3, 14.4, 14.5
+ * Shows progress and results for each step.
  */
 
 import { useState, useEffect } from 'react';
-import BarcodeScanner from '@/components/BarcodeScanner';
-import DetailedErrorDisplay, { type ErrorDetails } from '@/components/DetailedErrorDisplay';
-import ProgressTracker from '@/components/ProgressTracker';
-import NutritionInsightsDisplay from '@/components/NutritionInsightsDisplay';
-import GuidedCaptureUI from '@/components/GuidedCaptureUI';
-import CompletionPrompt from '@/components/CompletionPrompt';
-import ProductHeroToggle from '@/components/ProductHeroToggle';
-import { useProductHero } from '@/contexts/ProductHeroContext';
-import { saveAnalysis, getRecentAnalyses, clearHistory } from '@/lib/storage';
-import type { SavedScan } from '@/lib/types';
-import type { ImageType } from '@/lib/multi-image/DataMerger';
-// TODO: MultiImageOrchestrator should be called from API routes, not client
-// import { multiImageOrchestrator } from '@/lib/multi-image/MultiImageOrchestrator';
-import { useAuth } from '@/contexts/AuthContext';
-import { parseApiError, formatErrorForDisplay } from '@/lib/utils/error-handler';
+import ImageScanner from '@/components/ImageScanner';
 
-interface ProgressStep {
-  stage?: string;
-  type?: string;
-  message: string;
-  timestamp: number;
-  metadata?: Record<string, any>;
+interface ExtractionStep {
+  name: string;
+  status: 'pending' | 'processing' | 'success' | 'failed' | 'skipped';
+  data?: any;
+  error?: string;
+  confidence?: number;
+  processingTime?: number;
 }
 
-interface ScanResult {
-  success: boolean;
-  product?: {
-    id: string;
-    name: string;
-    brand: string;
-    barcode?: string;
-    size?: string;
-    category: string;
-    imageUrl?: string;
-  };
-  tier: number;
-  confidenceScore: number;
-  processingTimeMs: number;
-  cached: boolean;
-  warning?: string;
-  error?: {
-    code: string;
-    message: string;
-  };
-  // Dimension analysis fields
-  dimensionAnalysis?: {
-    dimensions: {
-      health: DimensionScore;
-      processing: DimensionScore;
-      allergens: DimensionScore;
-      responsiblyProduced: DimensionScore;
-      environmentalImpact: DimensionScore;
-    };
-    overallConfidence: number;
-  };
-  dimensionStatus?: 'completed' | 'processing' | 'failed' | 'skipped';
-  dimensionCached?: boolean;
-  userTier?: 'free' | 'premium';
-  availableDimensions?: string[];
-  upgradePrompt?: string;
-}
-
-interface DimensionScore {
+interface HealthDimensionResult {
   score: number;
   explanation: string;
-  keyFactors: string[];
-  available: boolean;
-  locked: boolean;
+  key_factors: string[];
+  confidence: number;
 }
 
-export default function ScanPage() {
-  // Requirement 14.1: Check Product Hero flag to determine workflow mode
-  const { isProductHero, loading: productHeroLoading } = useProductHero();
-  const { user } = useAuth();
-  
-  const [scanning, setScanning] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<ScanResult | null>(null);
-  const [nutritionResult, setNutritionResult] = useState<any>(null); // Store nutrition analysis result separately
-  const [error, setError] = useState<ErrorDetails | null>(null);
-  const [devUserTier, setDevUserTier] = useState<'free' | 'premium'>('premium');
-  const [showHistory, setShowHistory] = useState(false);
-  const [history, setHistory] = useState<SavedScan[]>([]);
+interface ProcessingDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  additives_detected: {
+    preservatives: string[];
+    artificial_sweeteners: string[];
+    artificial_colors: string[];
+    other_additives: string[];
+  };
+  confidence: number;
+}
+
+interface AllergensDimensionResult {
+  score: number;
+  explanation: string;
+  key_factors: string[];
+  allergens_detected: {
+    major_allergens: string[];
+    other_allergens: string[];
+    cross_contamination_warnings: string[];
+    allergen_free_claims: string[];
+  };
+  confidence: number;
+}
+
+interface AllExtractionResult {
+  cached?: boolean;
+  cacheAge?: number;
+  skippedUpdate?: boolean;
+  reason?: string;
+  steps: {
+    barcode: ExtractionStep;
+    packaging: ExtractionStep;
+    ingredients: ExtractionStep;
+    nutrition: ExtractionStep;
+  };
+  healthDimension?: HealthDimensionResult;
+  processingDimension?: ProcessingDimensionResult;
+  allergensDimension?: AllergensDimensionResult;
+  productId?: string;
+  savedToDb: boolean;
+  totalProcessingTime: number;
+  imageSize: number;
+  timestamp: Date;
+}
+
+export default function TestAllPage() {
   const [showScanner, setShowScanner] = useState(false);
-  const [hasHistoryItems, setHasHistoryItems] = useState(false);
-  
-  // Progress tracking state
-  const [progressSteps, setProgressSteps] = useState<ProgressStep[]>([]);
-  const [partialResult, setPartialResult] = useState<any>(null);
-  const [timeoutWarning, setTimeoutWarning] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [currentStep, setCurrentStep] = useState<string>('');
+  const [result, setResult] = useState<AllExtractionResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [incompleteScanProductId, setIncompleteScanProductId] = useState<string | null>(null);
+  const [cameraInstructions, setCameraInstructions] = useState<string>('Point camera at packaging and take a picture');
 
-  // Guided capture state
-  // Requirement 14.4: Maintain workflow mode throughout Capture_Session
-  const [guidedCaptureStep, setGuidedCaptureStep] = useState<number>(1);
-  const [capturedImageTypes, setCapturedImageTypes] = useState<ImageType[]>([]);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [pendingGuidedImageType, setPendingGuidedImageType] = useState<ImageType | null>(null);
-  
-  // Requirement 14.1, 14.2, 14.3: Determine workflow mode based on Product Hero flag
-  const workflowMode: 'guided' | 'progressive' = isProductHero ? 'guided' : 'progressive';
-
-  // Reset session when workflow mode changes
+  // Restore incomplete scan state from localStorage on mount
   useEffect(() => {
-    console.log('[Scan Page] Workflow mode changed to:', workflowMode);
-    setSessionId(null);
-    setGuidedCaptureStep(1);
-    setCapturedImageTypes([]);
-  }, [workflowMode]);
-
-  // Check for history on client side only
-  useEffect(() => {
-    try {
-      const recentScans = getRecentAnalyses();
-      setHasHistoryItems(recentScans.length > 0);
-    } catch {
-      setHasHistoryItems(false);
+    const savedProductId = localStorage.getItem('incompleteScanProductId');
+    const savedInstructions = localStorage.getItem('cameraInstructions');
+    
+    if (savedProductId) {
+      setIncompleteScanProductId(savedProductId);
+      console.log('[Test All] 🔄 Restored incomplete scan state:', savedProductId);
     }
-  }, [result]); // Re-check when a new scan completes
+    
+    if (savedInstructions) {
+      setCameraInstructions(savedInstructions);
+      console.log('[Test All] 📝 Restored camera instructions:', savedInstructions);
+    }
+
+    // Check if viewing from history
+    const viewHistoryResult = localStorage.getItem('viewHistoryResult');
+    if (viewHistoryResult) {
+      try {
+        const historyResult = JSON.parse(viewHistoryResult);
+        setResult(historyResult);
+        console.log('[Test All] 📜 Loaded result from history');
+        // Clear the flag
+        localStorage.removeItem('viewHistoryResult');
+      } catch (error) {
+        console.error('[Test All] ❌ Failed to load history result:', error);
+      }
+    }
+  }, []);
+
+  // Helper function to determine missing extraction steps
+  const getMissingSteps = (steps: AllExtractionResult['steps']): string[] => {
+    const missing: string[] = [];
+    if (steps.barcode.status !== 'success') missing.push('barcode');
+    if (steps.packaging.status !== 'success') missing.push('packaging');
+    if (steps.ingredients.status !== 'success') missing.push('ingredients');
+    if (steps.nutrition.status !== 'success') missing.push('nutrition');
+    return missing;
+  };
+
+  // Helper function to generate camera instructions based on missing steps
+  const generateCameraInstructions = (missingSteps: string[]): string => {
+    if (missingSteps.length === 0) {
+      return 'Point camera at packaging and take a picture';
+    }
+
+    const instructions: string[] = [];
+    
+    if (missingSteps.includes('barcode')) {
+      instructions.push('barcode');
+    }
+    if (missingSteps.includes('nutrition')) {
+      instructions.push('nutrition facts label');
+    }
+    if (missingSteps.includes('ingredients')) {
+      instructions.push('ingredients list');
+    }
+    if (missingSteps.includes('packaging')) {
+      instructions.push('product name and brand');
+    }
+
+    if (instructions.length === 1) {
+      return `Point camera at ${instructions[0]} and take a picture`;
+    } else if (instructions.length === 2) {
+      return `Point camera at ${instructions[0]} and ${instructions[1]} and take a picture`;
+    } else {
+      const last = instructions.pop();
+      return `Point camera at ${instructions.join(', ')}, and ${last} and take a picture`;
+    }
+  };
+
+  // Helper function to check if scan is incomplete
+  const isIncomplete = (steps: AllExtractionResult['steps']): boolean => {
+    return getMissingSteps(steps).length > 0;
+  };
+
+  // Helper function to calculate completeness score
+  const calculateCompletenessScore = (steps: AllExtractionResult['steps']): number => {
+    let score = 0;
+    if (steps.barcode.status === 'success') score++;
+    if (steps.packaging.status === 'success') score++;
+    if (steps.ingredients.status === 'success') score++;
+    if (steps.nutrition.status === 'success') score++;
+    return score;
+  };
+
+  // Helper function to save scan to history
+  const saveToHistory = (extractionResult: AllExtractionResult) => {
+    try {
+      // Get product name and brand
+      const name = extractionResult.steps.packaging.data?.productName || 'Unknown Product';
+      const brand = extractionResult.steps.packaging.data?.brand || 'Unknown Brand';
+      const barcode = extractionResult.steps.barcode.data?.barcode;
+
+      // Get existing history
+      const historyJson = localStorage.getItem('scanHistory');
+      const history = historyJson ? JSON.parse(historyJson) : [];
+
+      // Check for duplicates based on productId or barcode
+      // Remove any existing entries that match this product
+      const isDuplicate = (item: any) => {
+        // Match by productId if both have it
+        if (extractionResult.productId && item.productId) {
+          return item.productId === extractionResult.productId;
+        }
+        // Match by barcode if both have it
+        if (barcode && item.barcode) {
+          return item.barcode === barcode;
+        }
+        // Match by name and brand as fallback
+        return item.name === name && item.brand === brand;
+      };
+
+      // Filter out duplicates
+      const filteredHistory = history.filter((item: any) => !isDuplicate(item));
+
+      // Create new history item
+      const historyItem = {
+        id: Date.now().toString(),
+        productId: extractionResult.productId,
+        barcode,
+        name,
+        brand,
+        timestamp: new Date().toISOString(),
+        completenessScore: calculateCompletenessScore(extractionResult.steps),
+        result: extractionResult,
+      };
+
+      // Add new item to beginning (this moves duplicates to top)
+      filteredHistory.unshift(historyItem);
+
+      // Keep only last 10 items
+      const trimmedHistory = filteredHistory.slice(0, 10);
+
+      // Save back to localStorage
+      localStorage.setItem('scanHistory', JSON.stringify(trimmedHistory));
+      
+      const wasUpdate = history.length > filteredHistory.length;
+      console.log('[Test All] 💾', wasUpdate ? 'Updated existing item in history (moved to top)' : 'Saved new item to history');
+    } catch (error) {
+      console.error('[Test All] ❌ Failed to save to history:', error);
+    }
+  };
 
   const handleScanComplete = async (scanData: {
-    barcode?: string;
     image?: string;
     imageMimeType?: string;
   }) => {
-    // Check if this is a guided capture with pending image type
-    if (workflowMode === 'guided' && pendingGuidedImageType && scanData.image) {
-      console.log('[Scan Page] 📸 Guided capture via scanner:', {
-        imageType: pendingGuidedImageType,
-        hasBarcode: !!scanData.barcode,
-      });
-      
-      // Close scanner
-      setShowScanner(false);
-      
-      // Process through guided capture handler, passing barcode if available
-      await handleGuidedImageCapture(pendingGuidedImageType, scanData.image, scanData.barcode);
-      
-      // Clear pending type
-      setPendingGuidedImageType(null);
+    setShowScanner(false);
+    setLoading(true);
+    setError(null);
+    setCurrentStep('Starting extraction...');
+    
+    // Scroll to top to show loading state
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    if (!scanData.image) {
+      setError('No image captured');
+      setLoading(false);
       return;
     }
     
-    const startTime = Date.now(); // Track start time
-    setLoading(true);
-    setError(null);
-    setResult(null);
-    setNutritionResult(null); // Reset nutrition result
-    setProgressSteps([]); // Reset progress
-    setPartialResult(null); // Reset partial result
-    setTimeoutWarning(false); // Reset timeout warning
+    const startTime = Date.now();
     
-    // Set timeout warning after 30 seconds
-    const timeoutId = setTimeout(() => {
-      if (loading) {
-        setTimeoutWarning(true);
-      }
-    }, 30000);
-
     try {
-      console.log('[Scan Page] 📤 Starting scan workflow:', {
-        hasBarcode: !!scanData.barcode,
-        hasImage: !!scanData.image,
-      });
-
-      // Step 1: Classify the image if we have one
-      let imageType: 'barcode' | 'product_image' | 'nutrition_label' | 'unknown' = 'unknown';
-      let classification: any = null;
+      console.log('[Test All] 📸 Image captured');
       
-      if (scanData.image) {
-        console.log('[Scan Page] 🔍 Classifying image...');
-        
-        const classifyResponse = await fetch('/api/classify-image', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            imageData: scanData.image,
-            tier: devUserTier,
-          }),
-        });
-
-        if (classifyResponse.ok) {
-          const classifyResult = await classifyResponse.json();
-          if (classifyResult.success && classifyResult.data) {
-            classification = classifyResult.data;
-            imageType = classification.type;
-            console.log('[Scan Page] ✅ Image classified as:', imageType, 'confidence:', classification.confidence);
-            console.log('[Scan Page] 📋 Metadata:', classification.metadata);
-          } else {
-            console.warn('[Scan Page] ⚠️ Classification response missing data, defaulting to product flow');
-            imageType = 'product_image';
-          }
-        } else {
-          console.warn('[Scan Page] ⚠️ Classification failed, defaulting to product flow');
-          imageType = 'product_image';
-        }
-      } else if (scanData.barcode) {
-        // If we only have a barcode, treat it as barcode type
-        imageType = 'barcode';
-      }
-
-      // Step 2: Route to appropriate endpoint based on classification
-      const hasNutritionalFacts = classification?.metadata?.hasNutritionalFacts === true;
-      const shouldRouteToNutrition = imageType === 'nutrition_label' || (hasNutritionalFacts && scanData.image);
+      // Calculate image size
+      const imageSize = Math.round((scanData.image.length * 3) / 4);
       
-      console.log('[Scan Page] 🔀 Routing decision:', {
-        imageType,
-        hasNutritionalFacts,
-        shouldRouteToNutrition,
-        classificationMetadata: classification?.metadata,
-      });
-      
-      if (shouldRouteToNutrition) {
-        console.log('[Scan Page] 🥗 Routing to nutrition analysis...');
-        
-        // Add progress steps for nutrition analysis
-        setProgressSteps([
-          {
-            type: 'classification',
-            message: 'Image classified as nutrition label',
-            timestamp: Date.now(),
-          },
-          {
-            type: 'cache_check',
-            message: 'Checking for cached nutrition data...',
-            timestamp: Date.now(),
-          },
-        ]);
-        
-        // Simulate progress updates while waiting for response
-        const progressInterval = setInterval(() => {
-          setProgressSteps(prev => {
-            const lastStep = prev[prev.length - 1];
-            if (lastStep?.type === 'cache_check') {
-              return [...prev, {
-                type: 'ocr_processing',
-                message: 'Extracting text from nutrition label...',
-                timestamp: Date.now(),
-              }];
-            } else if (lastStep?.type === 'ocr_processing') {
-              return [...prev, {
-                type: 'nutrition_parsing',
-                message: 'Parsing nutritional facts...',
-                timestamp: Date.now(),
-              }];
-            } else if (lastStep?.type === 'nutrition_parsing') {
-              return [...prev, {
-                type: 'ingredient_parsing',
-                message: 'Analyzing ingredients and allergens...',
-                timestamp: Date.now(),
-              }];
-            } else if (lastStep?.type === 'ingredient_parsing') {
-              return [...prev, {
-                type: 'health_scoring',
-                message: 'Calculating health score...',
-                timestamp: Date.now(),
-              }];
-            }
-            return prev;
-          });
-        }, 1500); // Update every 1.5 seconds
-        
-        try {
-          const response = await fetch('/api/analyze-nutrition', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              imageData: scanData.image,
-              userId: 'user-' + Date.now(),
-              sessionId: 'session-' + Date.now(),
-              tier: devUserTier,
-            }),
-          });
-
-          clearInterval(progressInterval); // Stop progress simulation
-
-          const data = await response.json();
-          
-          // Add final progress step
-          setProgressSteps(prev => [...prev, {
-            type: 'complete',
-            message: 'Analysis complete!',
-            timestamp: Date.now(),
-          }]);
-          
-          // Store nutrition analysis result
-          if (data.success) {
-            setNutritionResult(data.data); // Store full nutrition data
-            
-            // Also create a basic result for compatibility
-            const nutritionResult: ScanResult = {
-              success: true,
-              product: {
-                id: 'nutrition-' + Date.now(),
-                name: data.data.productName || 'Nutrition Label',
-                brand: 'Unknown',
-                category: 'Food',
-              },
-              tier: 4,
-              confidenceScore: 0.95,
-              processingTimeMs: Date.now() - startTime,
-              cached: data.data.fromCache,
-              dimensionStatus: 'skipped',
-              userTier: devUserTier,
-              availableDimensions: [],
-            };
-            
-            setResult(nutritionResult);
-            console.log('[Scan Page] 📥 Nutrition analysis complete:', nutritionResult);
-            return; // Exit early, don't continue to product scan
-          }
-        } catch (error) {
-          clearInterval(progressInterval); // Stop progress simulation on error
-          throw error; // Re-throw to be caught by outer try-catch
-        }
-      }
-
-      // Step 3: Continue with existing product scan flow
-      console.log('[Scan Page] 📦 Routing to product scan...');
-
-      // Prepare request body
-      const body: any = {
-        userId: 'user-' + Date.now(), // In production, use actual user ID
-        sessionId: sessionId || 'session-' + Date.now(),
-        devUserTier, // Add tier toggle
-        streaming: true, // Enable progress streaming
-        // Requirement 14.4: Pass workflowMode to MultiImageOrchestrator
-        // TODO: When MultiImageOrchestrator is integrated via API, pass workflowMode
-        workflowMode, // 'guided' | 'progressive'
+      // Prepare request body - include productId if completing an incomplete scan
+      const requestBody: any = {
+        image: scanData.image,
       };
-
-      if (scanData.barcode) {
-        body.barcode = scanData.barcode;
+      
+      if (incompleteScanProductId) {
+        requestBody.productId = incompleteScanProductId;
+        console.log('[Test All] 🔄 Completing scan for product:', incompleteScanProductId);
       }
-
-      if (scanData.image) {
-        body.image = scanData.image;
-        body.imageMimeType = scanData.imageMimeType || 'image/jpeg';
-      }
-
-      // Call multi-tier scan API with streaming
-      const response = await fetch('/api/scan-multi-tier', {
+      
+      // Call test API endpoint
+      const response = await fetch('/api/test-all-extraction', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(body),
+        body: JSON.stringify(requestBody),
       });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || 'Scan failed');
-      }
-
-      if (!response.body) {
-        throw new Error('No response body');
-      }
-
-      // Handle SSE stream
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.substring(6);
-            try {
-              const event = JSON.parse(data);
-              
-              // Handle different event types
-              if (event.type === 'progress') {
-                console.log('[Scan Page] Progress:', event.message);
-                // Update progress state
-                setProgressSteps(prev => [...prev, {
-                  type: event.stage || 'progress',
-                  message: event.message || 'Processing...',
-                  timestamp: event.timestamp || Date.now(),
-                }]);
-              } else if (event.type === 'partial') {
-                console.log('[Scan Page] Partial result:', event.data);
-                setPartialResult(event.data);
-              } else if (event.type === 'complete') {
-                console.log('[Scan Page] 📥 Scan complete:', event.data);
-                setResult(event.data);
-                
-                if (event.data.success && event.data.product) {
-                  // Save successful scan to history
-                  try {
-                    const analysisResult = {
-                      products: [{
-                        productName: event.data.product.name,
-                        brand: event.data.product.brand,
-                        category: event.data.product.category,
-                        barcode: event.data.product.barcode,
-                        size: event.data.product.size,
-                        confidence: event.data.confidenceScore,
-                        dimensions: event.data.dimensionAnalysis?.dimensions || {},
-                      }],
-                      metadata: {
-                        tier: event.data.tier,
-                        cached: event.data.cached,
-                        processingTimeMs: event.data.processingTimeMs,
-                      },
-                    };
-                    
-                    if (scanData.image) {
-                      saveAnalysis(scanData.image, analysisResult as any);
-                    }
-                  } catch (storageError) {
-                    console.warn('Failed to save to localStorage:', storageError);
-                  }
-                }
-              } else if (event.type === 'error') {
-                console.error('[Scan Page] Error event:', event.error);
-                setError({
-                  message: event.error?.message || 'Scan failed',
-                  code: event.error?.code,
-                  timestamp: new Date(),
-                  context: {
-                    barcode: scanData.barcode,
-                    tier: devUserTier,
-                  },
-                });
-              }
-            } catch (parseError) {
-              console.error('[Scan Page] Error parsing event:', parseError);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error('[Scan Page] ❌ Scan error:', err);
-      setError({
-        message: err instanceof Error ? err.message : 'An error occurred',
-        timestamp: new Date(),
-        context: {
-          barcode: scanData.barcode,
-          tier: devUserTier,
-          errorType: err instanceof Error ? err.name : 'Unknown',
-        },
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-    } finally {
-      setLoading(false);
-      setScanning(false);
-      clearTimeout(timeoutId); // Clear timeout on completion or error
-    }
-  };
-
-  const handleScanError = (errorMessage: string) => {
-    setError({
-      message: errorMessage,
-      timestamp: new Date(),
-      context: {
-        source: 'scanner',
-        tier: devUserTier,
-      },
-    });
-    setScanning(false);
-  };
-
-  /**
-   * Process image through MultiImageOrchestrator for progressive mode
-   * Requirements 2.1, 2.2, 7.1: Use orchestrator for multi-image workflow via API
-   */
-  const processImageThroughOrchestrator = async (imageData: string) => {
-    try {
-      console.log('[Scan Page] 🔄 Processing through orchestrator (progressive mode)');
       
-      // Get userId from auth context
-      const userId = user?.id || 'anonymous-' + Date.now();
-      
-      // Call API route
-      const response = await fetch('/api/scan-multi-image', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageData,
-          userId,
-          workflowMode: 'progressive',
-          sessionId: sessionId || undefined,
-        }),
-      });
+      const processingTime = Date.now() - startTime;
       
       if (!response.ok) {
         const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to process image');
+        throw new Error(errorData.error || 'Extraction failed');
       }
       
-      const orchestratorResult = await response.json();
-      console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
+      const data = await response.json();
       
-      // Update session ID if this is the first capture or if session expired
-      if (!sessionId || orchestratorResult.sessionExpired) {
-        setSessionId(orchestratorResult.sessionId);
-      }
-      
-      // Display recovery message if session expired
-      if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
-        console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
-        // You could display this as a toast notification or info banner
-      }
-      
-      // Update captured types for completion prompt
-      setCapturedImageTypes(orchestratorResult.completionStatus.capturedTypes);
-      
-      // Handle ProcessImageResult and update UI accordingly
-      if (orchestratorResult.success) {
-        // Convert Product to ScanResult format for UI compatibility
-        const scanResult: ScanResult = {
-          success: true,
-          product: {
-            id: orchestratorResult.product.id,
-            name: orchestratorResult.product.name,
-            brand: orchestratorResult.product.brand || 'Unknown',
-            barcode: orchestratorResult.product.barcode,
-            size: orchestratorResult.product.size,
-            category: orchestratorResult.product.category || 'Unknown',
-            imageUrl: orchestratorResult.product.image_url,
-          },
-          tier: 4, // Multi-image orchestrator uses tier 4
-          confidenceScore: 0.95,
-          processingTimeMs: 0,
-          cached: false,
-          dimensionStatus: 'skipped',
-          userTier: devUserTier,
-          availableDimensions: [],
-        };
-        
-        setResult(scanResult);
-        
-        // Display CompletionPrompt in progressive mode if not all images captured
-        if (!orchestratorResult.completionStatus.complete) {
-          console.log('[Scan Page] 📋 Showing completion prompt, missing:', 
-            orchestratorResult.completionStatus.missingTypes);
-        } else {
-          console.log('[Scan Page] ✅ All images captured, product complete');
-        }
-      }
-    } catch (err) {
-      console.error('[Scan Page] ❌ Orchestrator processing error:', err);
-      throw err; // Re-throw to be caught by caller
-    }
-  };
-
-  const getTierName = (tier: number) => {
-    switch (tier) {
-      case 1: return 'Direct Barcode';
-      case 2: return 'Visual Text';
-      case 3: return 'Discovery';
-      case 4: return 'AI Analysis';
-      default: return 'Unknown';
-    }
-  };
-
-  const getTierColor = (tier: number) => {
-    switch (tier) {
-      case 1: return 'bg-green-500';
-      case 2: return 'bg-blue-500';
-      case 3: return 'bg-yellow-500';
-      case 4: return 'bg-purple-500';
-      default: return 'bg-gray-500';
-    }
-  };
-
-  const handleViewHistory = () => {
-    try {
-      const recentScans = getRecentAnalyses();
-      setHistory(recentScans);
-      setShowHistory(true);
-    } catch (err) {
-      console.error('Failed to load history:', err);
-      setError({
-        message: 'Unable to load scan history.',
+      const extractionResult: AllExtractionResult = {
+        cached: data.cached,
+        cacheAge: data.cacheAge,
+        skippedUpdate: data.skippedUpdate,
+        reason: data.reason,
+        steps: data.steps,
+        healthDimension: data.healthDimension,
+        processingDimension: data.processingDimension,
+        allergensDimension: data.allergensDimension,
+        productId: data.productId,
+        savedToDb: data.savedToDb,
+        totalProcessingTime: processingTime,
+        imageSize,
         timestamp: new Date(),
-        context: {
-          source: 'history',
-          errorType: err instanceof Error ? err.name : 'Unknown',
-        },
-      });
-    }
-  };
-
-  const handleClearHistory = () => {
-    try {
-      clearHistory();
-      setHistory([]);
-    } catch (err) {
-      console.error('Failed to clear history:', err);
-      setError({
-        message: 'Unable to clear scan history.',
-        timestamp: new Date(),
-        context: {
-          source: 'history',
-          errorType: err instanceof Error ? err.name : 'Unknown',
-        },
-      });
-    }
-  };
-
-  const handleCloseHistory = () => {
-    setShowHistory(false);
-  };
-
-  const handleLoadHistoryScan = (scan: SavedScan) => {
-    // Convert SavedScan back to ScanResult format
-    const product = scan.results.products[0] as any; // Type assertion for extended fields
-    const results = scan.results as any; // Type assertion for metadata
-    if (product) {
-      const scanResult: ScanResult = {
-        success: true,
-        product: {
-          id: product.barcode || 'unknown',
-          name: product.productName,
-          brand: product.brand || 'Unknown',
-          barcode: product.barcode,
-          size: product.size,
-          category: product.category || 'Unknown',
-        },
-        tier: results.metadata?.tier || 4,
-        confidenceScore: product.confidence || 0.9,
-        processingTimeMs: results.metadata?.processingTimeMs || 0,
-        cached: results.metadata?.cached || false,
-        // Add dimension analysis if available
-        dimensionAnalysis: product.dimensions ? {
-          dimensions: product.dimensions as any,
-          overallConfidence: 0.9,
-        } : undefined,
-        dimensionStatus: product.dimensions ? 'completed' : 'skipped',
-        dimensionCached: true,
       };
-      setResult(scanResult);
-      setShowHistory(false);
-    }
-  };
-
-  const handleStartScan = () => {
-    setShowScanner(true);
-    setResult(null);
-    setError(null);
-  };
-
-  const handleCloseScan = () => {
-    setShowScanner(false);
-  };
-
-  /**
-   * Handle guided capture image submission
-   * Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true
-   * Requirements 2.1, 2.2: Call MultiImageOrchestrator.processImage() via API
-   */
-  const handleGuidedImageCapture = async (imageType: ImageType, imageData: string, barcode?: string) => {
-    setLoading(true);
-    setError(null);
-    
-    try {
-      console.log('[Scan Page] 📸 Guided capture:', { 
-        imageType, 
-        step: guidedCaptureStep,
-        hasBarcode: !!barcode,
-      });
       
-      // Get userId from auth context
-      const userId = user?.id || 'anonymous-' + Date.now();
+      setResult(extractionResult);
+      setCurrentStep('');
       
-      // Reset session if this is the first step to ensure fresh workflow
-      const effectiveSessionId = guidedCaptureStep === 1 ? undefined : (sessionId || undefined);
-      if (guidedCaptureStep === 1 && sessionId) {
-        console.log('[Scan Page] 🔄 Resetting session for new guided workflow');
-        setSessionId(null);
-        setCapturedImageTypes([]);
-      }
+      // Save to history
+      saveToHistory(extractionResult);
       
-      // Call API route
-      const response = await fetch('/api/scan-multi-image', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          imageData,
-          userId,
-          workflowMode: 'guided',
-          sessionId: effectiveSessionId,
-          imageType,
-          barcode, // Pass barcode if available from BarcodeDetector
-        }),
-      });
-      
-      if (!response.ok) {
-        const apiError = await parseApiError(response);
-        const errorDisplay = formatErrorForDisplay(apiError);
+      // Check if scan is incomplete and track productId
+      if (extractionResult.productId && isIncomplete(extractionResult.steps)) {
+        setIncompleteScanProductId(extractionResult.productId);
+        const missing = getMissingSteps(extractionResult.steps);
+        const instructions = generateCameraInstructions(missing);
+        setCameraInstructions(instructions);
         
-        throw new Error(JSON.stringify({
-          ...errorDisplay,
-          statusCode: apiError.statusCode,
-          errorCode: apiError.errorCode,
-        }));
-      }
-      
-      const orchestratorResult = await response.json();
-      console.log('[Scan Page] ✅ Orchestrator result:', orchestratorResult);
-      
-      // Update session ID if this is the first capture or if session expired
-      if (!sessionId || orchestratorResult.sessionExpired) {
-        setSessionId(orchestratorResult.sessionId);
-      }
-      
-      // Display recovery message if session expired
-      if (orchestratorResult.sessionExpired && orchestratorResult.recoveryMessage) {
-        console.log('[Scan Page] ⚠️  Session expired:', orchestratorResult.recoveryMessage);
-        // You could display this as a toast notification or info banner
-      }
-      
-      // Update captured types
-      setCapturedImageTypes(orchestratorResult.completionStatus.capturedTypes);
-      
-      // Handle ProcessImageResult and update UI accordingly
-      if (orchestratorResult.success) {
-        // Convert Product to ScanResult format for UI compatibility
-        const scanResult: ScanResult = {
-          success: true,
-          product: {
-            id: orchestratorResult.product.id,
-            name: orchestratorResult.product.name,
-            brand: orchestratorResult.product.brand || 'Unknown',
-            barcode: orchestratorResult.product.barcode,
-            size: orchestratorResult.product.size,
-            category: orchestratorResult.product.category || 'Unknown',
-            imageUrl: orchestratorResult.product.image_url,
-          },
-          tier: 4, // Multi-image orchestrator uses tier 4
-          confidenceScore: 0.95,
-          processingTimeMs: 0,
-          cached: false,
-          dimensionStatus: 'skipped',
-          userTier: devUserTier,
-          availableDimensions: [],
-        };
+        // Persist to localStorage for page refresh
+        localStorage.setItem('incompleteScanProductId', extractionResult.productId);
+        localStorage.setItem('cameraInstructions', instructions);
         
-        setResult(scanResult);
-        
-        // If nutrition data is available, set it for display
-        if (orchestratorResult.product.nutrition_data) {
-          const nutritionData = {
-            productName: orchestratorResult.product.name,
-            nutritionalFacts: {
-              servingSize: orchestratorResult.product.nutrition_data.servingSize,
-              calories: { 
-                value: orchestratorResult.product.nutrition_data.calories, 
-                confidence: 0.95 
-              },
-              totalFat: { 
-                value: orchestratorResult.product.nutrition_data.macros.fat, 
-                confidence: 0.95 
-              },
-              saturatedFat: { 
-                value: orchestratorResult.product.nutrition_data.macros.saturatedFat, 
-                confidence: 0.95 
-              },
-              transFat: { 
-                value: orchestratorResult.product.nutrition_data.macros.transFat, 
-                confidence: 0.95 
-              },
-              cholesterol: { 
-                value: 0, 
-                confidence: 0.5 
-              },
-              sodium: { 
-                value: orchestratorResult.product.nutrition_data.sodium, 
-                confidence: 0.95 
-              },
-              totalCarbohydrates: { 
-                value: orchestratorResult.product.nutrition_data.macros.carbs, 
-                confidence: 0.95 
-              },
-              dietaryFiber: { 
-                value: orchestratorResult.product.nutrition_data.macros.fiber, 
-                confidence: 0.95 
-              },
-              totalSugars: { 
-                value: orchestratorResult.product.nutrition_data.macros.sugars, 
-                confidence: 0.95 
-              },
-              protein: { 
-                value: orchestratorResult.product.nutrition_data.macros.protein, 
-                confidence: 0.95 
-              },
-              validationStatus: 'valid' as const,
-            },
-            ingredients: {
-              rawText: '',
-              ingredients: orchestratorResult.product.allergen_types?.map((allergen: string) => ({
-                name: allergen,
-                isAllergen: true,
-                isPreservative: false,
-                isSweetener: false,
-                isArtificialColor: false,
-              })) || [],
-              allergens: orchestratorResult.product.allergen_types?.map((allergen: string) => ({
-                name: allergen,
-                isAllergen: true,
-                isPreservative: false,
-                isSweetener: false,
-                isArtificialColor: false,
-              })) || [],
-              preservatives: [],
-              sweeteners: [],
-              artificialColors: [],
-              isComplete: true,
-              confidence: 0.95,
-            },
-            healthScore: {
-              overall: orchestratorResult.product.health_score || 0,
-              category: orchestratorResult.product.health_score >= 80 ? 'excellent' : 
-                       orchestratorResult.product.health_score >= 60 ? 'good' : 
-                       orchestratorResult.product.health_score >= 40 ? 'fair' : 'poor',
-              factors: [],
-            },
-            timestamp: new Date(),
-          };
-          setNutritionResult(nutritionData);
-          console.log('[Scan Page] 📊 Nutrition data set:', nutritionData);
-        }
-        
-        // Display next step prompt in guided mode
-        if (orchestratorResult.nextStep) {
-          setGuidedCaptureStep(prev => prev + 1);
-          console.log('[Scan Page] ➡️  Next step:', orchestratorResult.nextStep);
-        } else {
-          // All images captured, show completion
-          console.log('[Scan Page] ✅ All images captured, workflow complete');
-          // Set step to 4 to indicate completion and hide guided capture UI
-          setGuidedCaptureStep(4);
-          
-          // Trigger dimension analysis for premium users
-          if (orchestratorResult.completionStatus.complete && orchestratorResult.product.barcode) {
-            console.log('[Scan Page] 🎯 Triggering dimension analysis...');
-            try {
-              const dimensionResponse = await fetch('/api/scan-multi-tier', {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  barcode: orchestratorResult.product.barcode,
-                  userId,
-                  sessionId: orchestratorResult.sessionId,
-                  devUserTier,
-                }),
-              });
-              
-              if (dimensionResponse.ok) {
-                const dimensionResult = await dimensionResponse.json();
-                console.log('[Scan Page] ✅ Dimension analysis complete:', dimensionResult);
-                
-                // Update the scan result with dimension analysis
-                setResult(prev => prev ? {
-                  ...prev,
-                  dimensionAnalysis: dimensionResult.dimensionAnalysis,
-                  dimensionStatus: dimensionResult.dimensionStatus,
-                  dimensionCached: dimensionResult.dimensionCached,
-                  userTier: dimensionResult.userTier,
-                  availableDimensions: dimensionResult.availableDimensions,
-                  upgradePrompt: dimensionResult.upgradePrompt,
-                } : prev);
-              } else {
-                console.warn('[Scan Page] ⚠️  Dimension analysis failed:', await dimensionResponse.text());
-              }
-            } catch (err) {
-              console.error('[Scan Page] ❌ Dimension analysis error:', err);
-              // Don't fail the workflow if dimension analysis fails
-            }
-          }
-        }
+        console.log('[Test All] ⚠️ Incomplete scan detected. Missing:', missing);
+        console.log('[Test All] 📝 Camera instructions:', instructions);
+        console.log('[Test All] 💾 Stored productId in state and localStorage:', extractionResult.productId);
+      } else if (extractionResult.productId && !isIncomplete(extractionResult.steps)) {
+        // Scan is complete, clear incomplete state
+        setIncompleteScanProductId(null);
+        setCameraInstructions('Point camera at packaging and take a picture');
+        localStorage.removeItem('incompleteScanProductId');
+        localStorage.removeItem('cameraInstructions');
+        console.log('[Test All] ✅ Complete scan achieved');
+      } else if (!extractionResult.productId && isIncomplete(extractionResult.steps)) {
+        // Incomplete scan but no productId (save failed)
+        console.log('[Test All] ⚠️ Incomplete scan but no productId - save may have failed');
+        console.log('[Test All] 💡 User can try scanning again to save the product');
+        // Don't set incomplete state since we can't update a non-existent product
+        setIncompleteScanProductId(null);
+        localStorage.removeItem('incompleteScanProductId');
+        localStorage.removeItem('cameraInstructions');
+      } else if (!extractionResult.productId) {
+        console.log('[Test All] ⚠️ No productId returned from API - save may have failed');
       }
+      
+      console.log('[Test All] ✅ Extraction complete:', extractionResult);
+      
     } catch (err) {
-      console.error('[Scan Page] ❌ Guided capture error:', err);
-      
-      // Parse structured error if available
-      let errorDetails: ErrorDetails;
-      
-      if (err instanceof Error) {
-        try {
-          const parsedError = JSON.parse(err.message);
-          errorDetails = {
-            message: parsedError.title || 'Failed to process image',
-            timestamp: new Date(),
-            context: {
-              imageType,
-              step: guidedCaptureStep,
-              workflowMode: 'guided',
-              statusCode: parsedError.statusCode,
-              errorCode: parsedError.errorCode,
-              userMessage: parsedError.message,
-              action: parsedError.action,
-              retryable: parsedError.retryable,
-            },
-          };
-        } catch {
-          // Not a structured error, use default format
-          errorDetails = {
-            message: err.message || 'Failed to process image',
-            timestamp: new Date(),
-            context: {
-              imageType,
-              step: guidedCaptureStep,
-              workflowMode: 'guided',
-            },
-          };
-        }
-      } else {
-        errorDetails = {
-          message: 'Failed to process image',
-          timestamp: new Date(),
-          context: {
-            imageType,
-            step: guidedCaptureStep,
-            workflowMode: 'guided',
-          },
-        };
-      }
-      
-      setError(errorDetails);
+      console.error('[Test All] ❌ Error:', err);
+      setError(err instanceof Error ? err.message : 'Unknown error');
+      setCurrentStep('');
     } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * Handle request to open scanner for guided capture
-   * Opens scanner modal and stores the expected image type
-   */
-  const handleGuidedCaptureRequest = (imageType: ImageType) => {
-    console.log('[Scan Page] 📸 Opening scanner for guided capture:', imageType);
-    setPendingGuidedImageType(imageType);
-    setShowScanner(true);
+  const handleReset = () => {
+    setResult(null);
+    setError(null);
+    setCurrentStep('');
   };
 
-  /**
-   * Handle completion prompt capture request
-   * Requirement 14.3: Route to progressive capture UI if isProductHero is false
-   * Requirement 7.1: Display CompletionPrompt in progressive mode
-   */
-  const handleCompletionCaptureRequest = async (imageType: ImageType) => {
-    console.log('[Scan Page] 📸 Completion capture request:', imageType);
-    
-    // Store the requested image type for the next capture
-    // When the scanner completes, we'll process it through the orchestrator
-    setShowScanner(true);
-    
-    // TODO: We could store the requested imageType in state and use it
-    // to validate the captured image matches what was requested
+  const getStatusIcon = (status: string) => {
+    switch (status) {
+      case 'success': return '✅';
+      case 'failed': return '❌';
+      case 'processing': return '⏳';
+      case 'pending': return '⏸️';
+      default: return '○';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'success': return 'text-green-600';
+      case 'failed': return 'text-red-600';
+      case 'processing': return 'text-blue-600';
+      default: return 'text-gray-400';
+    }
+  };
+
+  const getHealthScoreColor = (score: number) => {
+    if (score >= 80) return 'text-green-600 bg-green-50';
+    if (score >= 60) return 'text-yellow-600 bg-yellow-50';
+    if (score >= 40) return 'text-orange-600 bg-orange-50';
+    return 'text-red-600 bg-red-50';
+  };
+
+  const getHealthScoreLabel = (score: number) => {
+    if (score >= 90) return 'Excellent';
+    if (score >= 80) return 'Very Good';
+    if (score >= 70) return 'Good';
+    if (score >= 60) return 'Fair';
+    if (score >= 50) return 'Below Average';
+    if (score >= 40) return 'Poor';
+    if (score >= 30) return 'Very Poor';
+    return 'Extremely Poor';
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-4xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">🛒 AI Grocery Scanner</h1>
-              <p className="text-sm text-gray-600 mt-1">
-                Product Research Agent
-              </p>
-            </div>
-            
-            {/* Tier Toggle */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-600">Dev Mode:</span>
-              <button
-                onClick={() => setDevUserTier(devUserTier === 'free' ? 'premium' : 'free')}
-                className={`relative inline-flex h-8 w-16 items-center rounded-full transition-colors ${
-                  devUserTier === 'premium' ? 'bg-blue-600' : 'bg-gray-300'
-                }`}
-              >
-                <span
-                  className={`inline-block h-6 w-6 transform rounded-full bg-white transition-transform ${
-                    devUserTier === 'premium' ? 'translate-x-9' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-              <span className={`text-sm font-semibold ${
-                devUserTier === 'premium' ? 'text-blue-600' : 'text-gray-600'
-              }`}>
-                {devUserTier === 'premium' ? '💎 Premium' : '📋 Free'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="max-w-4xl mx-auto px-4 py-6 pb-24">
-        {/* Product Hero Toggle - Show when not in scanner or history view */}
-        {!showHistory && !showScanner && !loading && (
-          <div className="mb-6">
-            <ProductHeroToggle />
-          </div>
-        )}
-
-        {/* Guided Capture UI - Requirement 14.2: Route to GuidedCaptureUI if isProductHero is true */}
-        {workflowMode === 'guided' && !showHistory && !showScanner && guidedCaptureStep <= 3 && (
-          <div className="space-y-6">
-            {/* Product Hero Mode Header */}
-            <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg p-4 border-2 border-blue-200">
-              <div className="flex items-center gap-3">
-                <div className="text-3xl">🦸</div>
-                <div>
-                  <h2 className="text-lg font-bold text-gray-800">
-                    Product Hero Mode
-                  </h2>
-                  <p className="text-sm text-gray-600">
-                    Guided multi-image capture workflow
-                  </p>
-                </div>
-              </div>
-            </div>
-
-            {/* Guided Capture Component */}
-            <GuidedCaptureUI
-              currentStep={guidedCaptureStep}
-              onImageCapture={handleGuidedImageCapture}
-              onCaptureRequest={handleGuidedCaptureRequest}
-              isProcessing={loading}
-              error={error?.message}
-            />
-          </div>
-        )}
-
-        {/* Guided Mode Results - Show after workflow completion */}
-        {workflowMode === 'guided' && guidedCaptureStep === 4 && result && !loading && (
-          <div className="space-y-4">
-            {/* Nutrition Analysis Display */}
-            {nutritionResult ? (
-              <NutritionInsightsDisplay
-                result={nutritionResult}
-                showDetails={true}
-              />
-            ) : (
-              <div className="bg-white rounded-lg shadow-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <span className="inline-block px-4 py-2 rounded-full text-white font-semibold bg-green-500">
-                    ✓ Product Captured
-                  </span>
-                </div>
-                
-                <div className="space-y-4">
-                  <div>
-                    <h3 className="text-xl font-bold text-gray-900">{result.product?.name || 'Unknown Product'}</h3>
-                    <p className="text-gray-600">{result.product?.brand || 'Unknown Brand'}</p>
-                    {result.product?.barcode && (
-                      <p className="text-sm text-gray-500 mt-1">Barcode: {result.product.barcode}</p>
-                    )}
-                  </div>
-                  
-                  {result.product?.size && (
-                    <div>
-                      <span className="text-sm font-medium text-gray-700">Size: </span>
-                      <span className="text-sm text-gray-600">{result.product.size}</span>
-                    </div>
-                  )}
-                  
-                  {result.product?.category && (
-                    <div>
-                      <span className="text-sm font-medium text-gray-700">Category: </span>
-                      <span className="text-sm text-gray-600">{result.product.category}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Dimension Analysis Results */}
-            {result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
-              <div className="bg-white rounded-lg shadow-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold text-gray-900">
-                    🎯 Dimension Analysis
-                  </h3>
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    result.dimensionCached 
-                      ? 'bg-green-100 text-green-800' 
-                      : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {result.dimensionCached ? '💾 Cached' : '🤖 Fresh'}
-                  </span>
-                </div>
-
-                {/* User Tier Badge */}
-                <div className="mb-4 flex items-center gap-2">
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    result.userTier === 'premium'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {result.userTier === 'premium' ? '💎 Premium Tier' : '📋 Free Tier'}
-                  </span>
-                  {result.upgradePrompt && (
-                    <span className="text-sm text-gray-600">
-                      {result.upgradePrompt}
-                    </span>
-                  )}
-                </div>
-
-                {/* Dimensions Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {Object.entries(result.dimensionAnalysis.dimensions).map(([key, dimension]) => {
-                    const getScoreColor = (score: number) => {
-                      if (score >= 67) return 'text-green-600 bg-green-50';
-                      if (score >= 34) return 'text-yellow-600 bg-yellow-50';
-                      return 'text-red-600 bg-red-50';
-                    };
-
-                    const getDimensionLabel = (key: string) => {
-                      const labels: Record<string, string> = {
-                        health: '🏥 Health',
-                        processing: '🏭 Processing',
-                        allergens: '⚠️ Allergens',
-                        responsiblyProduced: '🌱 Responsible',
-                        environmentalImpact: '🌍 Environmental',
-                      };
-                      return labels[key] || key;
-                    };
-
-                    return (
-                      <div
-                        key={key}
-                        className={`p-4 rounded-lg border-2 ${
-                          dimension.locked
-                            ? 'bg-gray-50 border-gray-200 opacity-60'
-                            : 'bg-white border-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-gray-900">
-                            {getDimensionLabel(key)}
-                          </span>
-                          {dimension.locked ? (
-                            <span className="text-2xl">🔒</span>
-                          ) : (
-                            <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(dimension.score)}`}>
-                              {dimension.score}
-                            </span>
-                          )}
-                        </div>
-                        {dimension.available && !dimension.locked && (
-                          <div>
-                            <p className="text-sm text-gray-600 mb-2">
-                              {dimension.explanation}
-                            </p>
-                            {dimension.keyFactors && dimension.keyFactors.length > 0 && (
-                              <ul className="text-xs text-gray-500 space-y-1">
-                                {dimension.keyFactors.map((factor, idx) => (
-                                  <li key={idx} className="flex items-start">
-                                    <span className="mr-1">•</span>
-                                    <span>{factor}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        )}
-                        {dimension.locked && (
-                          <p className="text-sm text-gray-500 italic">
-                            Upgrade to Premium to unlock
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Overall Confidence */}
-                {result.dimensionAnalysis.overallConfidence && (
-                  <div className="mt-4 pt-4 border-t border-gray-200">
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm font-medium text-gray-700">
-                        Overall Confidence
-                      </span>
-                      <span className="text-sm text-gray-600">
-                        {(result.dimensionAnalysis.overallConfidence * 100).toFixed(0)}%
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-            
-            {/* Start New Scan Button */}
+    <div className="min-h-screen bg-gray-50 p-4 pb-24">
+      <div className="max-w-2xl mx-auto">
+        {/* Header */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
+          <div className="flex items-center justify-between mb-2">
+            <h1 className="text-2xl font-bold text-gray-900">
+              🔬 AI Product Analysis
+            </h1>
             <button
-              onClick={() => {
-                setGuidedCaptureStep(1);
-                setResult(null);
-                setNutritionResult(null);
-                setSessionId(null);
-                setCapturedImageTypes([]);
-              }}
-              className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+              onClick={() => window.location.href = '/history'}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium rounded-lg transition-colors text-sm"
             >
-              Start New Scan
+              📜 History
             </button>
           </div>
-        )}
+        </div>
 
-        {/* Scanner Modal - Should be accessible from both guided and progressive modes */}
-        {showScanner && (
-          <div className="fixed inset-0 bg-black z-50 flex flex-col">
-            <div className="flex-1 overflow-auto">
-              <BarcodeScanner
-                onScanComplete={(scanData) => {
-                  handleCloseScan();
-                  handleScanComplete(scanData);
-                }}
-                onError={handleScanError}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Progressive Capture UI - Requirement 14.3: Route to progressive capture UI if isProductHero is false */}
-        {workflowMode === 'progressive' && !showHistory && !showScanner && (
-          <>
-        {/* History View */}
-        {showHistory ? (
-          <div className="space-y-4">
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="text-xl font-bold text-gray-800">Scan History</h2>
-                <button
-                  onClick={handleCloseHistory}
-                  className="text-blue-600 hover:text-blue-700 font-medium"
-                >
-                  Close
-                </button>
-              </div>
-
-              {history.length === 0 ? (
-                <div className="text-center py-8 px-4 bg-gray-50 rounded-lg">
-                  <p className="text-gray-600">No scan history yet</p>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Your scanned products will appear here
-                  </p>
-                </div>
-              ) : (
-                <>
-                  <div className="space-y-3">
-                    {history.map((scan, index) => {
-                      const product = scan.results.products[0] as any; // Type assertion for extended fields
-                      return (
-                        <div
-                          key={scan.timestamp}
-                          className="bg-white rounded-lg border-2 border-gray-200 p-4 hover:border-blue-300 transition-colors"
-                        >
-                          <div className="flex gap-4">
-                            <img
-                              src={scan.imageData}
-                              alt={`Scan ${index + 1}`}
-                              className="w-20 h-20 object-cover rounded"
-                            />
-                            <div className="flex-1">
-                              <p className="text-sm text-gray-500">
-                                {new Date(scan.timestamp).toLocaleString()}
-                              </p>
-                              {product && (
-                                <>
-                                  <p className="text-base font-semibold text-gray-900 mt-1">
-                                    {product.productName}
-                                  </p>
-                                  <p className="text-sm text-gray-600">
-                                    {product.brand || 'Unknown Brand'}
-                                  </p>
-                                </>
-                              )}
-                              <button
-                                onClick={() => handleLoadHistoryScan(scan)}
-                                className="text-sm text-blue-600 hover:text-blue-700 font-medium mt-2"
-                              >
-                                View Results
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <button
-                    onClick={handleClearHistory}
-                    className="w-full mt-4 px-6 py-3 bg-red-100 hover:bg-red-200 text-red-700 font-medium rounded-lg transition-colors"
-                  >
-                    Clear All History
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        ) : (
-          <>
-        {/* Welcome Message - Show when no scan in progress and no results */}
-        {!loading && !result && (
-          <div className="space-y-6">
-            {/* Hero Section */}
-            <div className="text-center py-8">
-              <div className="text-6xl mb-4">🛒</div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-2">
-                AI Grocery Scanner - Beta Testing
-              </h2>
-              <p className="text-gray-600">
-                Help us test product identification and analysis
+        {/* Instructions */}
+        {!result && !loading && (
+          <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6 mb-4">
+            <h2 className="font-bold text-blue-900 mb-2">📋 Instructions</h2>
+            <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+              <li>Click "Start Complete Scan" button below</li>
+              <li>Capture ONE image showing the product</li>
+              <li>System will extract all information from this single image</li>
+              <li>If ingredients and nutrition are found, health dimension analysis will run automatically</li>
+              <li>If ingredients are found, processing and allergens dimension analysis will run automatically</li>
+              <li>Review results for each extraction type and dimension scores</li>
+            </ol>
+            <div className="mt-3 p-3 bg-blue-100 rounded">
+              <p className="text-xs text-blue-900 font-medium mb-2">
+                💡 Best practices:
               </p>
-            </div>
-
-            {/* How to Analyze Products */}
-            <div className="bg-white rounded-lg shadow-lg p-6">
-              <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-                <span>📸</span>
-                <span>How to Analyze Products</span>
-              </h3>
-              <ul className="space-y-3 text-gray-700">
-                <li className="flex items-start gap-3">
-                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
-                  <span>
-                    <strong>Best results:</strong> Scan a product barcode directly
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
-                  <span>
-                    You can also scan the main packaging of a product, including the label
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-green-600 font-bold flex-shrink-0">✓</span>
-                  <span>
-                    You can scan multiple products at the same time
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="text-blue-600 font-bold flex-shrink-0">💎</span>
-                  <span>
-                    <strong>For best results:</strong> Toggle to Premium mode (top right)
-                  </span>
-                </li>
+              <ul className="text-xs text-blue-800 space-y-1 list-disc list-inside">
+                <li>Capture image with barcode, product name, ingredients, and nutrition label visible</li>
+                <li>Good lighting and focus are critical</li>
+                <li>Health dimension analyzes nutritional value (0-100 score)</li>
+                <li>Processing dimension detects preservatives, artificial additives, and processing level</li>
+                <li>Allergens dimension identifies major allergens and cross-contamination risks</li>
+                <li>If one extraction fails, others will still proceed</li>
               </ul>
             </div>
-
-            {/* Testing Instructions */}
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-6">
-              <h3 className="text-lg font-bold text-blue-900 mb-4 flex items-center gap-2">
-                <span>🧪</span>
-                <span>Help Us Test</span>
-              </h3>
-              <ol className="space-y-3 text-blue-900">
-                <li className="flex items-start gap-3">
-                  <span className="font-bold flex-shrink-0">1.</span>
-                  <span>
-                    Take a picture of a <strong>barcode</strong> and wait for results
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="font-bold flex-shrink-0">2.</span>
-                  <span>
-                    Take a picture of the <strong>front of the package</strong>, including the product name. 
-                    You should get the same results from cache or the database
-                  </span>
-                </li>
-                <li className="flex items-start gap-3">
-                  <span className="font-bold flex-shrink-0">3.</span>
-                  <span>
-                    If you get any errors, use the <strong>"Copy Error Report"</strong> button and send it back to us
-                  </span>
-                </li>
-              </ol>
-            </div>
-
-            {/* Quick Tips */}
-            <div className="bg-gray-50 rounded-lg p-4 border border-gray-200">
-              <p className="text-sm text-gray-600 text-center">
-                💡 <strong>Tip:</strong> Make sure the barcode or product label is clearly visible and well-lit for best results
-              </p>
-            </div>
           </div>
         )}
 
-        {/* Loading State with Progress Tracker */}
+        {/* Scan Button */}
+        {!result && !loading && (
+          <button
+            onClick={() => setShowScanner(true)}
+            className="w-full px-6 py-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors text-lg"
+          >
+            📷 Start Complete Scan
+          </button>
+        )}
+
+        {/* Loading State */}
         {loading && (
-          <div className="space-y-4">
-            {/* Progress Tracker */}
-            {progressSteps.length > 0 && (
-              <ProgressTracker
-                steps={progressSteps}
-                isActive={loading}
-                partialResult={partialResult}
-                error={error?.message || null}
-                timeoutWarning={timeoutWarning}
-              />
-            )}
+          <div className="bg-white rounded-lg shadow-lg p-8">
+            <div className="text-center mb-6">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+              <p className="text-gray-600 font-medium">Processing all extractions...</p>
+              {currentStep && (
+                <p className="text-sm text-gray-500 mt-2">{currentStep}</p>
+              )}
+            </div>
             
-            {/* Fallback loading spinner if no progress yet */}
-            {progressSteps.length === 0 && (
-              <div className="bg-white rounded-lg shadow-lg p-12 text-center">
-                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto mb-4"></div>
-                <p className="text-lg font-medium text-gray-700">Identifying product...</p>
-                <p className="text-sm text-gray-500 mt-2">This may take a few seconds</p>
+            <div className="space-y-3">
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded">
+                <span className="text-xl">⏳</span>
+                <span className="text-sm text-gray-700">Step 1: Barcode detection</span>
               </div>
-            )}
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded">
+                <span className="text-xl">⏳</span>
+                <span className="text-sm text-gray-700">Step 2: Packaging information</span>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded">
+                <span className="text-xl">⏳</span>
+                <span className="text-sm text-gray-700">Step 3: Ingredients list</span>
+              </div>
+              <div className="flex items-center gap-3 p-3 bg-gray-50 rounded">
+                <span className="text-xl">⏳</span>
+                <span className="text-sm text-gray-700">Step 4: Nutrition facts</span>
+              </div>
+            </div>
           </div>
         )}
 
         {/* Error Display */}
-        {error && !loading && (
-          <DetailedErrorDisplay
-            error={error}
-            title="Scan Error"
-            onRetry={() => {
-              setError(null);
-              setScanning(true);
-            }}
-            onDismiss={() => setError(null)}
-          />
+        {error && (
+          <div className="bg-red-50 border-2 border-red-300 rounded-lg p-6 mb-4">
+            <div className="flex items-start gap-3">
+              <span className="text-2xl">⚠️</span>
+              <div className="flex-1">
+                <h3 className="font-bold text-red-900 mb-1">Extraction Failed</h3>
+                <p className="text-red-800 text-sm">{error}</p>
+              </div>
+            </div>
+            <button
+              onClick={handleReset}
+              className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+            >
+              Try Again
+            </button>
+          </div>
         )}
 
-        {/* Result Display */}
-        {result && !loading && (
+        {/* Results Display */}
+        {result && (
           <div className="space-y-4">
-            {/* Nutrition Analysis Display */}
-            {nutritionResult ? (
-              <NutritionInsightsDisplay
-                result={nutritionResult}
-                showDetails={true}
-              />
-            ) : (
-              <>
-            {/* Success/Failure Badge */}
+            {/* Summary Banner */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <div className="flex items-center justify-between mb-4">
-                <span
-                  className={`inline-block px-4 py-2 rounded-full text-white font-semibold ${
-                    result.success ? 'bg-green-500' : 'bg-red-500'
-                  }`}
-                >
-                  {result.success ? '✓ Product Identified' : '✗ Identification Failed'}
-                </span>
-                
-                <span className={`inline-block px-3 py-1 rounded-full text-white text-sm font-medium ${getTierColor(result.tier)}`}>
-                  Tier {result.tier}: {getTierName(result.tier)}
-                </span>
-              </div>
-
-              {/* Warning */}
-              {result.warning && (
-                <div className="mb-4 p-4 bg-yellow-50 border-l-4 border-yellow-400 rounded">
-                  <div className="flex items-start">
-                    <span className="text-yellow-600 mr-2 text-xl">⚠️</span>
-                    <p className="text-sm text-yellow-800">{result.warning}</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Product Information */}
-              {result.product && (
-                <div className="space-y-4">
-                  <div>
-                    <h2 className="text-2xl font-bold text-gray-900 mb-1">
-                      {result.product.name}
-                    </h2>
-                    <p className="text-lg text-gray-600">{result.product.brand}</p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-                    {result.product.barcode && (
-                      <div>
-                        <p className="text-sm text-gray-500">Barcode</p>
-                        <p className="font-mono font-semibold">{result.product.barcode}</p>
-                      </div>
-                    )}
-                    
-                    {result.product.size && (
-                      <div>
-                        <p className="text-sm text-gray-500">Size</p>
-                        <p className="font-semibold">{result.product.size}</p>
-                      </div>
-                    )}
-                    
-                    <div>
-                      <p className="text-sm text-gray-500">Category</p>
-                      <p className="font-semibold">{result.product.category}</p>
-                    </div>
-                    
-                    <div>
-                      <p className="text-sm text-gray-500">Confidence</p>
-                      <p className="font-semibold">
-                        {(result.confidenceScore * 100).toFixed(0)}%
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Metrics */}
-                  <div className="pt-4 border-t flex items-center justify-between text-sm">
-                    <span className={`px-3 py-1 rounded-full ${result.cached ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800'}`}>
-                      {result.cached ? '💾 Cached' : '🤖 Fresh'}
+                <h2 className="text-xl font-bold text-gray-900">
+                  Extraction Complete
+                </h2>
+                <div className="flex gap-2">
+                  {result.cached && (
+                    <span className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-sm font-medium">
+                      ⚡ Cached ({result.cacheAge} days old)
                     </span>
-                    <span className="text-gray-600">
-                      {result.processingTimeMs}ms
+                  )}
+                  {result.skippedUpdate && (
+                    <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-sm font-medium">
+                      🛡️ Existing Data Preserved
                     </span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Dimension Analysis Results */}
-            {result.dimensionAnalysis && result.dimensionStatus === 'completed' && (
-              <div className="bg-white rounded-lg shadow-lg p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-xl font-bold text-gray-900">
-                    🎯 Dimension Analysis
-                  </h3>
-                  <span className={`px-3 py-1 rounded-full text-sm ${
-                    result.dimensionCached 
-                      ? 'bg-green-100 text-green-800' 
-                      : 'bg-blue-100 text-blue-800'
-                  }`}>
-                    {result.dimensionCached ? '💾 Cached' : '🤖 Fresh'}
-                  </span>
-                </div>
-
-                {/* User Tier Badge */}
-                <div className="mb-4 flex items-center gap-2">
-                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                    result.userTier === 'premium'
-                      ? 'bg-blue-100 text-blue-800'
-                      : 'bg-gray-100 text-gray-800'
-                  }`}>
-                    {result.userTier === 'premium' ? '💎 Premium Tier' : '📋 Free Tier'}
-                  </span>
-                  {result.upgradePrompt && (
-                    <span className="text-sm text-gray-600">
-                      {result.upgradePrompt}
+                  )}
+                  {result.savedToDb && !result.skippedUpdate && !result.cached && (
+                    <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
+                      💾 Saved to DB
                     </span>
                   )}
                 </div>
+              </div>
 
-                {/* Dimensions Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {Object.entries(result.dimensionAnalysis.dimensions).map(([key, dimension]) => {
-                    const getScoreColor = (score: number) => {
-                      if (score >= 67) return 'text-green-600 bg-green-50';
-                      if (score >= 34) return 'text-yellow-600 bg-yellow-50';
-                      return 'text-red-600 bg-red-50';
-                    };
-
-                    const getDimensionLabel = (key: string) => {
-                      const labels: Record<string, string> = {
-                        health: '🏥 Health',
-                        processing: '🏭 Processing',
-                        allergens: '⚠️ Allergens',
-                        responsiblyProduced: '🌱 Responsible',
-                        environmentalImpact: '🌍 Environmental',
-                      };
-                      return labels[key] || key;
-                    };
-
-                    return (
-                      <div
-                        key={key}
-                        className={`p-4 rounded-lg border-2 ${
-                          dimension.locked
-                            ? 'bg-gray-50 border-gray-200 opacity-60'
-                            : 'bg-white border-gray-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-gray-900">
-                            {getDimensionLabel(key)}
-                          </span>
-                          {dimension.locked ? (
-                            <span className="text-2xl">🔒</span>
-                          ) : (
-                            <span className={`px-3 py-1 rounded-full font-bold ${getScoreColor(dimension.score)}`}>
-                              {dimension.score}
-                            </span>
-                          )}
-                        </div>
-                        {dimension.available && !dimension.locked && (
-                          <div>
-                            <p className="text-sm text-gray-600 mb-2">
-                              {dimension.explanation}
-                            </p>
-                            {dimension.keyFactors && dimension.keyFactors.length > 0 && (
-                              <ul className="text-xs text-gray-500 space-y-1">
-                                {dimension.keyFactors.map((factor, idx) => (
-                                  <li key={idx} className="flex items-start">
-                                    <span className="mr-1">•</span>
-                                    <span>{factor}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                        )}
-                        {dimension.locked && (
-                          <p className="text-sm text-gray-500 italic">
-                            Upgrade to Premium to unlock
-                          </p>
-                        )}
-                      </div>
-                    );
-                  })}
+              {/* Skipped Update Notice */}
+              {result.skippedUpdate && (
+                <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
+                  <div className="flex items-start gap-3">
+                    <span className="text-xl">ℹ️</span>
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-yellow-900 mb-1">
+                        Update Skipped - Existing Data is Better Quality
+                      </p>
+                      <p className="text-xs text-yellow-800">
+                        This product already exists in the database with more complete information. 
+                        The existing data has been preserved to maintain quality. 
+                        Showing the existing product data below.
+                      </p>
+                    </div>
+                  </div>
                 </div>
+              )}
 
-                {/* Overall Confidence */}
-                <div className="mt-4 pt-4 border-t text-center">
-                  <span className="text-sm text-gray-600">
-                    Analysis Confidence: {' '}
-                    <span className="font-semibold">
-                      {(result.dimensionAnalysis.overallConfidence * 100).toFixed(0)}%
-                    </span>
-                  </span>
+              {/* Overall Metrics */}
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-600 mb-1">Total Time</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    {(result.totalProcessingTime / 1000).toFixed(1)}s
+                  </p>
+                </div>
+                <div className="bg-gray-50 rounded-lg p-3">
+                  <p className="text-xs text-gray-600 mb-1">Image Size</p>
+                  <p className="text-lg font-bold text-gray-900">
+                    {(result.imageSize / 1024).toFixed(1)}KB
+                  </p>
                 </div>
               </div>
-            )}
 
-            {/* Dimension Analysis Failed */}
-            {result.dimensionStatus === 'failed' && (
-              <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-6">
-                <div className="flex items-start">
-                  <span className="text-2xl mr-3">⚠️</span>
-                  <div>
-                    <h3 className="font-semibold text-yellow-900 mb-1">
-                      Dimension Analysis Unavailable
-                    </h3>
-                    <p className="text-yellow-800 text-sm">
-                      Product was identified successfully, but dimension analysis failed. 
-                      This may be due to API rate limits. Try again in a moment.
+              {/* Step Status Overview */}
+              <div className="space-y-2">
+                {Object.entries(result.steps).map(([key, step]) => (
+                  <div
+                    key={key}
+                    className={`flex items-center justify-between p-3 rounded-lg ${
+                      step.status === 'success' ? 'bg-green-50' :
+                      step.status === 'failed' ? 'bg-red-50' :
+                      'bg-gray-50'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xl ${getStatusColor(step.status)}`}>
+                        {getStatusIcon(step.status)}
+                      </span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {step.name}
+                      </span>
+                    </div>
+                    {step.processingTime && (
+                      <span className="text-xs text-gray-500">
+                        {step.processingTime}ms
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Complete Scan Button - shown when extraction is incomplete AND not loading */}
+            {!loading && incompleteScanProductId && result && isIncomplete(result.steps) && (
+              <div className="bg-orange-50 border-2 border-orange-200 rounded-lg shadow-lg p-4">
+                <div className="flex items-start gap-3 mb-3">
+                  <span className="text-2xl">⚠️</span>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-orange-900 mb-1">
+                      Incomplete Scan Detected
+                    </p>
+                    <p className="text-xs text-orange-800">
+                      Some information is missing. Capture another image to complete this product scan.
                     </p>
                   </div>
                 </div>
+                <button
+                  onClick={() => {
+                    setShowScanner(true);
+                    // Scroll to top when opening scanner for complete scan
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className="w-full px-6 py-3 bg-orange-600 hover:bg-orange-700 text-white font-semibold rounded-lg transition-colors"
+                >
+                  📷 Complete Scan
+                </button>
               </div>
             )}
+            {/* Debug: Show button render conditions */}
+            {result && (() => {
+              console.log('[Test All] 🔍 Button render check:', {
+                loading,
+                incompleteScanProductId,
+                hasResult: !!result,
+                isIncomplete: isIncomplete(result.steps),
+                shouldShow: !!(incompleteScanProductId && result && isIncomplete(result.steps) && !loading)
+              });
+              return null;
+            })()}
 
-            {/* Action Buttons - Removed, only Scan button in footer */}
+            {/* Detailed Results */}
+            <div className="bg-white rounded-lg shadow-lg p-6">
+              <h3 className="text-lg font-bold text-gray-900 mb-4">Detailed Results</h3>
 
-            {/* Report Error Option */}
-            {result.success && result.product && result.confidenceScore < 0.9 && (
-              <button
-                onClick={() => {
-                  // TODO: Implement error reporting
-                  alert('Error reporting functionality coming soon!');
-                }}
-                className="w-full px-4 py-2 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors"
-              >
-                ⚠️ Report Incorrect Identification
-              </button>
-            )}
+              {/* Health Dimension Results - MOVED TO TOP */}
+              {result.healthDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🏥</span>
+                    Health Dimension Analysis
+                  </h4>
+                  
+                  {/* Health Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.healthDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Health Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.healthDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.healthDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.healthDimension.score >= 80 ? 'bg-green-500' :
+                          result.healthDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.healthDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.healthDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
 
-            {/* Completion Prompt - Show in progressive mode when product has partial data */}
-            {workflowMode === 'progressive' && capturedImageTypes.length > 0 && capturedImageTypes.length < 3 && (
-              <div className="mt-4">
-                <CompletionPrompt
-                  capturedTypes={capturedImageTypes}
-                  onCaptureRequest={handleCompletionCaptureRequest}
-                  isProcessing={loading}
-                />
-              </div>
-            )}
-            </>
-            )}
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.healthDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.healthDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.healthDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Processing Dimension Results */}
+              {result.processingDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🔬</span>
+                    Processing Dimension Analysis
+                  </h4>
+                  
+                  {/* Processing Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.processingDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Processing Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.processingDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.processingDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.processingDimension.score >= 80 ? 'bg-green-500' :
+                          result.processingDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.processingDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.processingDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.processingDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.processingDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Additives Detected */}
+                  {(result.processingDimension.additives_detected.preservatives.length > 0 ||
+                    result.processingDimension.additives_detected.artificial_sweeteners.length > 0 ||
+                    result.processingDimension.additives_detected.artificial_colors.length > 0 ||
+                    result.processingDimension.additives_detected.other_additives.length > 0) && (
+                    <div className="bg-red-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-red-900 mb-3">⚠️ Additives Detected</p>
+                      
+                      {result.processingDimension.additives_detected.preservatives.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Preservatives:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.preservatives.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.artificial_sweeteners.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Artificial Sweeteners:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.artificial_sweeteners.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.artificial_colors.length > 0 && (
+                        <div className="mb-3">
+                          <p className="text-xs font-medium text-red-800 mb-1">Artificial Colors:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.artificial_colors.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {result.processingDimension.additives_detected.other_additives.length > 0 && (
+                        <div>
+                          <p className="text-xs font-medium text-red-800 mb-1">Other Additives:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {result.processingDimension.additives_detected.other_additives.map((item, index) => (
+                              <span key={index} className="text-xs px-2 py-1 bg-red-100 text-red-800 rounded">
+                                {item}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.processingDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Allergens Dimension Results */}
+              {result.allergensDimension && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🥜</span>
+                    Allergens Dimension Analysis
+                  </h4>
+                  
+                  {/* Allergens Score */}
+                  <div className={`rounded-lg p-6 mb-4 ${getHealthScoreColor(result.allergensDimension.score)}`}>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium">Allergen Safety Score</span>
+                      <span className="text-xs px-2 py-1 bg-white rounded-full">
+                        {getHealthScoreLabel(result.allergensDimension.score)}
+                      </span>
+                    </div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-5xl font-bold">
+                        {result.allergensDimension.score}
+                      </span>
+                      <span className="text-2xl font-medium">/100</span>
+                    </div>
+                    <div className="mt-3 w-full bg-white rounded-full h-3 overflow-hidden">
+                      <div
+                        className={`h-full transition-all ${
+                          result.allergensDimension.score >= 80 ? 'bg-green-500' :
+                          result.allergensDimension.score >= 60 ? 'bg-yellow-500' :
+                          result.allergensDimension.score >= 40 ? 'bg-orange-500' :
+                          'bg-red-500'
+                        }`}
+                        style={{ width: `${result.allergensDimension.score}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Explanation */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-2">Analysis</p>
+                    <p className="text-sm text-gray-700 leading-relaxed">
+                      {result.allergensDimension.explanation}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <p className="text-sm font-medium text-gray-900 mb-3">Key Factors</p>
+                    <ul className="space-y-2">
+                      {result.allergensDimension.key_factors.map((factor, index) => (
+                        <li key={index} className="flex items-start gap-2 text-sm text-gray-700">
+                          <span className="text-gray-400 mt-0.5">•</span>
+                          <span className="flex-1">{factor}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* Major Allergens Detected */}
+                  {result.allergensDimension.allergens_detected.major_allergens.length > 0 && (
+                    <div className="bg-red-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-red-900 mb-3">⚠️ Major Allergens Present</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.major_allergens.map((allergen, index) => (
+                          <span key={index} className="px-3 py-1 bg-red-600 text-white rounded-full text-sm font-medium">
+                            {allergen}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Other Allergens */}
+                  {result.allergensDimension.allergens_detected.other_allergens.length > 0 && (
+                    <div className="bg-orange-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-orange-900 mb-3">Other Allergens</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.other_allergens.map((allergen, index) => (
+                          <span key={index} className="px-3 py-1 bg-orange-200 text-orange-900 rounded-full text-sm">
+                            {allergen}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Cross-Contamination Warnings */}
+                  {result.allergensDimension.allergens_detected.cross_contamination_warnings.length > 0 && (
+                    <div className="bg-yellow-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-yellow-900 mb-2">⚠️ Cross-Contamination Warnings</p>
+                      <ul className="space-y-1">
+                        {result.allergensDimension.allergens_detected.cross_contamination_warnings.map((warning, index) => (
+                          <li key={index} className="text-sm text-yellow-800">
+                            • {warning}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Allergen-Free Claims */}
+                  {result.allergensDimension.allergens_detected.allergen_free_claims.length > 0 && (
+                    <div className="bg-green-50 rounded-lg p-4 mb-3">
+                      <p className="text-sm font-medium text-green-900 mb-3">✓ Allergen-Free Claims</p>
+                      <div className="flex flex-wrap gap-2">
+                        {result.allergensDimension.allergens_detected.allergen_free_claims.map((claim, index) => (
+                          <span key={index} className="px-3 py-1 bg-green-200 text-green-900 rounded-full text-sm">
+                            {claim}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Confidence */}
+                  <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+                    <span>Analysis Confidence:</span>
+                    <span className="font-medium">
+                      {(result.allergensDimension.confidence * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Barcode Results */}
+              {result.steps.barcode.status === 'success' && result.steps.barcode.data && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🔍</span>
+                    Barcode Detection
+                  </h4>
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <p className="text-sm text-gray-600 mb-1">Barcode Number:</p>
+                    <p className="text-2xl font-mono font-bold text-gray-900">
+                      {result.steps.barcode.data.barcode}
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Packaging Results */}
+              {result.steps.packaging.status === 'success' && result.steps.packaging.data && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>📦</span>
+                    Packaging Information
+                  </h4>
+                  <div className="space-y-3">
+                    {result.steps.packaging.data.productName && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-600 mb-1">Product Name:</p>
+                        <p className="text-lg font-bold text-gray-900">
+                          {result.steps.packaging.data.productName}
+                        </p>
+                      </div>
+                    )}
+                    {result.steps.packaging.data.brand && (
+                      <div className="bg-gray-50 rounded-lg p-3">
+                        <p className="text-xs text-gray-600 mb-1">Brand:</p>
+                        <p className="text-base font-semibold text-gray-900">
+                          {result.steps.packaging.data.brand}
+                        </p>
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3">
+                      {result.steps.packaging.data.size && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">Size:</p>
+                          <p className="text-sm font-medium text-gray-900">
+                            {result.steps.packaging.data.size}
+                          </p>
+                        </div>
+                      )}
+                      {result.steps.packaging.data.category && (
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-600 mb-1">Category:</p>
+                          <p className="text-sm font-medium text-gray-900">
+                            {result.steps.packaging.data.category}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Ingredients Results */}
+              {result.steps.ingredients.status === 'success' && result.steps.ingredients.data && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>🥫</span>
+                    Ingredients List
+                  </h4>
+                  <div className="bg-gray-50 rounded-lg p-4">
+                    <p className="text-xs text-gray-600 mb-3">
+                      Total: {result.steps.ingredients.data.ingredients.length} ingredients
+                    </p>
+                    <ol className="space-y-2">
+                      {result.steps.ingredients.data.ingredients.map((ingredient: string, index: number) => (
+                        <li key={index} className="text-sm text-gray-900 flex">
+                          <span className="text-gray-500 mr-2 font-medium">{index + 1}.</span>
+                          <span className="flex-1">{ingredient}</span>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                </div>
+              )}
+
+              {/* Nutrition Results */}
+              {result.steps.nutrition.status === 'success' && result.steps.nutrition.data && (
+                <div className="mb-6 pb-6 border-b">
+                  <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                    <span>📊</span>
+                    Nutrition Facts
+                  </h4>
+                  
+                  {/* Serving Info */}
+                  <div className="bg-gray-50 rounded-lg p-4 mb-3">
+                    <div className="space-y-2">
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Serving Size:</span>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {result.steps.nutrition.data.serving_size}
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Servings Per Container:</span>
+                        <span className="text-sm font-semibold text-gray-900">
+                          {result.steps.nutrition.data.servings_per_container}
+                        </span>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t">
+                        <span className="text-sm font-bold text-gray-900">Calories:</span>
+                        <span className="text-lg font-bold text-gray-900">
+                          {result.steps.nutrition.data.calories_per_serving}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Macros */}
+                  {result.steps.nutrition.data.macros && (
+                    <div className="bg-gray-50 rounded-lg p-4">
+                      <p className="text-xs font-bold text-gray-900 mb-3">Macronutrients</p>
+                      <div className="space-y-2 text-sm">
+                        {Object.entries(result.steps.nutrition.data.macros).map(([key, value]: [string, any]) => (
+                          <div key={key} className="flex justify-between">
+                            <span className="text-gray-700 capitalize">
+                              {key.replace(/_/g, ' ')}
+                            </span>
+                            <span className="font-medium text-gray-900">
+                              {value.value}{value.unit}
+                              {value.dv_percent !== null && value.dv_percent !== undefined && 
+                                ` (${value.dv_percent}% DV)`
+                              }
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Failed Steps */}
+              {Object.entries(result.steps).some(([_, step]) => step.status === 'failed') && (
+                <div className="mt-6 pt-6 border-t">
+                  <h4 className="font-bold text-red-900 mb-3">Failed Extractions</h4>
+                  <div className="space-y-2">
+                    {Object.entries(result.steps)
+                      .filter(([_, step]) => step.status === 'failed')
+                      .map(([key, step]) => (
+                        <div key={key} className="bg-red-50 rounded-lg p-3">
+                          <p className="text-sm font-medium text-red-900">{step.name}</p>
+                          <p className="text-xs text-red-700 mt-1">{step.error}</p>
+                        </div>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         )}
-        </>
-        )
-        }
-        </>
-        )
-        }
+
+        {/* Scanner Modal */}
+        {showScanner && (
+          <div className="fixed inset-0 bg-black z-50 flex flex-col">
+            <ImageScanner
+              scanType="packaging"
+              instruction={cameraInstructions}
+              onScanComplete={handleScanComplete}
+              onClose={() => setShowScanner(false)}
+              onError={(error) => {
+                setError(error);
+                setShowScanner(false);
+              }}
+            />
+          </div>
+        )}
       </div>
 
-      {/* Footer with Scan and History Buttons - Hide in guided mode since GuidedCaptureUI has its own capture button */}
-      {!showHistory && !showScanner && workflowMode === 'progressive' && (
-        <footer className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 shadow-lg z-40">
-          <div className="max-w-4xl mx-auto px-4 py-3">
+      {/* Fixed Footer - Only show when results are displayed */}
+      {result && !loading && (
+        <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-lg z-40">
+          <div className="max-w-2xl mx-auto p-4">
             <div className="flex gap-3">
-              {hasHistoryItems && (
-                <button
-                  onClick={handleViewHistory}
-                  className="flex-1 min-h-[56px] px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-700 font-semibold rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <span role="img" aria-label="history" className="text-xl">📋</span>
-                  <span>History</span>
-                </button>
-              )}
               <button
-                onClick={handleStartScan}
-                disabled={loading}
-                className={`${hasHistoryItems ? 'flex-1' : 'w-full'} min-h-[56px] px-6 py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-semibold rounded-lg transition-colors flex items-center justify-center gap-2 text-lg`}
+                onClick={() => {
+                  handleReset();
+                  // Clear incomplete scan state when starting fresh
+                  setIncompleteScanProductId(null);
+                  setCameraInstructions('Point camera at packaging and take a picture');
+                  localStorage.removeItem('incompleteScanProductId');
+                  localStorage.removeItem('cameraInstructions');
+                  // Scroll to top when resetting
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="flex-1 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
               >
-                <span role="img" aria-label="scan" className="text-2xl">📷</span>
-                <span>Scan</span>
+                📷 Test Another Product
+              </button>
+              <button
+                onClick={() => window.location.href = '/'}
+                className="px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors"
+              >
+                🏠 Home
               </button>
             </div>
           </div>
-        </footer>
+        </div>
       )}
     </div>
   );

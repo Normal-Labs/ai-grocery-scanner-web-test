@@ -156,6 +156,9 @@ MONGODB_URI=your_mongodb_connection_string
 - ✅ SQL injection prevention (Supabase client)
 - ✅ XSS prevention (React escaping)
 - ✅ Service role key server-side only
+- ⚠️ **Authentication**: Currently open access - decision required
+
+**Note**: Authentication system is fully implemented but not enforced. See [AUTHENTICATION_PERMISSIONS.md](./AUTHENTICATION_PERMISSIONS.md) for details and recommendations.
 
 ### Privacy
 - ✅ History stored locally only

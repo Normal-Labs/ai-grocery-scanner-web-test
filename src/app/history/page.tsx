@@ -45,10 +45,10 @@ export default function HistoryPage() {
   };
 
   const handleViewScan = (item: HistoryItem) => {
-    // Store the selected result in localStorage for the test-all page to display
+    // Store the selected result in localStorage for the root page to display
     localStorage.setItem('viewHistoryResult', JSON.stringify(item.result));
-    // Navigate to test-all page
-    router.push('/test-all');
+    // Navigate to root page
+    router.push('/');
   };
 
   const handleClearHistory = () => {
@@ -107,7 +107,7 @@ export default function HistoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4">
+    <div className="min-h-screen bg-gray-50 p-4 pb-24">
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
@@ -141,7 +141,7 @@ export default function HistoryPage() {
                 Start scanning products to build your history
               </p>
               <button
-                onClick={() => router.push('/test-all')}
+                onClick={() => router.push('/')}
                 className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
               >
                 Start Scanning
@@ -193,13 +193,25 @@ export default function HistoryPage() {
           </div>
         )}
 
-        {/* Back Button */}
+        {/* Back Button - Keep for non-JS fallback */}
         <div className="mt-6">
           <button
-            onClick={() => router.push('/test-all')}
+            onClick={() => router.push('/')}
             className="w-full px-6 py-3 bg-gray-200 hover:bg-gray-300 text-gray-800 font-semibold rounded-lg transition-colors"
           >
             ← Back to Scanner
+          </button>
+        </div>
+      </div>
+
+      {/* Fixed Footer */}
+      <div className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-gray-200 shadow-lg z-40">
+        <div className="max-w-2xl mx-auto p-4">
+          <button
+            onClick={() => router.push('/')}
+            className="w-full px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition-colors"
+          >
+            🏠 Back to Scanner
           </button>
         </div>
       </div>

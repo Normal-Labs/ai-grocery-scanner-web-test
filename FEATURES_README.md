@@ -7,11 +7,13 @@
 - **[PRE_DEPLOYMENT_VERIFICATION.md](./PRE_DEPLOYMENT_VERIFICATION.md)** - Verification results (PASSED ✅)
 - **[DEPLOYMENT_SUMMARY.md](./DEPLOYMENT_SUMMARY.md)** - Executive summary and deployment approval
 - **[PRODUCTION_DEPLOYMENT.md](./PRODUCTION_DEPLOYMENT.md)** - Complete deployment checklist
+- **[AUTHENTICATION_PERMISSIONS.md](./AUTHENTICATION_PERMISSIONS.md)** - ⚠️ Auth decision required
 
 ### 📚 Feature Documentation
 - **[MULTI_SCAN_COMPLETION.md](./MULTI_SCAN_COMPLETION.md)** - Multi-scan feature technical docs
 - **[MULTI_SCAN_SUMMARY.md](./MULTI_SCAN_SUMMARY.md)** - Multi-scan quick reference
 - **[SCAN_HISTORY_FEATURE.md](./SCAN_HISTORY_FEATURE.md)** - Scan history documentation
+- **[SCAN_LOCATION_TRACKING.md](./SCAN_LOCATION_TRACKING.md)** - Location tracking (built, not enabled)
 - **[CACHE_IMPLEMENTATION.md](./CACHE_IMPLEMENTATION.md)** - Caching strategy
 - **[SESSION_SUMMARY.md](./SESSION_SUMMARY.md)** - Complete session overview
 

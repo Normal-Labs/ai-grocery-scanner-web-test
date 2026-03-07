@@ -1,3 +1,11 @@
+/*
+ * DEPRECATED - 2026-03-06
+ * This file has been replaced by the root page (/) which now uses /test-all functionality.
+ * This was the old /scan page with multi-tier scanning.
+ * Kept for reference - review for deletion later.
+ */
+
+/*
 'use client';
 
 /**
@@ -849,3 +857,4 @@ export default function ScanPage() {
     </div>
   );
 }
+*/

@@ -115,6 +115,13 @@ vercel --prod
 - Input validation in place
 - Privacy-friendly design
 
+### Authentication ⚠️ DECISION REQUIRED
+- Auth system: FULLY IMPLEMENTED
+- Auth components: READY (AuthGuard, AuthModal, AuthContext)
+- Current status: ALL PAGES OPEN ACCESS (no auth required)
+- **Decision needed**: Keep open or require authentication?
+- See: [AUTHENTICATION_PERMISSIONS.md](./AUTHENTICATION_PERMISSIONS.md)
+
 ---
 
 ## Expected Impact
@@ -274,6 +281,7 @@ Before deploying, verify:
 - ✅ Database connections working
 - ✅ Documentation reviewed
 - ✅ Team notified
+- ⚠️ **Authentication decision made** (see [AUTHENTICATION_PERMISSIONS.md](./AUTHENTICATION_PERMISSIONS.md))
 
 After deploying, verify:
 - ✅ All pages load
@@ -281,6 +289,7 @@ After deploying, verify:
 - ✅ Multi-scan works
 - ✅ History works
 - ✅ No errors in logs
+- ✅ Authentication works as intended (if enabled)
 
 ---
 
