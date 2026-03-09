@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from 'react';
 import ImageScanner from '@/components/ImageScanner';
+import BuyMeCoffeeButton from '@/components/BuyMeCoffeeWidget';
 
 interface ExtractionStep {
   name: string;
@@ -395,8 +396,9 @@ export default function TestAllPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 p-4 pb-24">
-      <div className="max-w-2xl mx-auto">
+    <>
+      <div className="min-h-screen bg-gray-50 p-4 pb-24">
+        <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="bg-white rounded-lg shadow-lg p-6 mb-4">
           <div className="flex items-center justify-between mb-2">
@@ -1155,10 +1157,12 @@ export default function TestAllPage() {
               >
                 🏠 Home
               </button>
+              <BuyMeCoffeeButton />
             </div>
           </div>
         </div>
       )}
-    </div>
+      </div>
+    </>
   );
 }

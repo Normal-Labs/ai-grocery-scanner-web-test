@@ -41,3 +41,13 @@ body {
 .pr-safe {
   padding-right: env(safe-area-inset-right, 1rem);
 }
+
+/* Buy Me a Coffee Widget - Hide floating button, we use custom button in footer */
+#bmc-wbtn {
+  display: none !important;
+}
+
+#bmc-wbtn + div {
+  bottom: 18px !important;
+  right: 18px !important;
+}
