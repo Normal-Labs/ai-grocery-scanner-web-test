@@ -589,7 +589,7 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
             onClick={() => {
               // Navigate to scan page
               if (typeof window !== 'undefined') {
-                window.location.href = '/v2/scan';
+                window.location.href = '/scan';
               }
             }}
             className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-xl transition-colors flex items-center justify-center gap-2"

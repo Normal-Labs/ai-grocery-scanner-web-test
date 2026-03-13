@@ -33,7 +33,7 @@ export function HamburgerMenu() {
           <button
             onClick={() => {
               setMenuOpen(false);
-              router.push('/v2');
+              router.push('/');
             }}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-secondary transition-colors text-left"
           >
@@ -43,7 +43,7 @@ export function HamburgerMenu() {
           <button
             onClick={() => {
               setMenuOpen(false);
-              router.push('/v2/about');
+              router.push('/about');
             }}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-secondary transition-colors text-left"
           >
@@ -53,7 +53,7 @@ export function HamburgerMenu() {
           <button
             onClick={() => {
               setMenuOpen(false);
-              router.push('/v2/history');
+              router.push('/history');
             }}
             className="w-full flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-secondary transition-colors text-left"
           >

@@ -182,7 +182,7 @@ export function HistoryScreen({ history, onViewScan, onClearHistory }: HistorySc
         <div className="max-w-md mx-auto px-5 py-4">
           <Button 
             className="w-full h-12 rounded-xl" 
-            onClick={() => router.push('/v2/scan')}
+            onClick={() => router.push('/scan')}
           >
             <Camera className="w-5 h-5 mr-2" />
             Scan
