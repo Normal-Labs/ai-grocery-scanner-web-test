@@ -137,7 +137,7 @@ export default function HomePage() {
       {/* Header */}
       <div className="flex items-center justify-between px-5 py-4">
         <div>
-          <h1 className="text-xl font-semibold text-foreground tracking-tight">Scan</h1>
+          <h1 className="text-xl font-semibold text-foreground tracking-tight">AI Product Scan</h1>
           <p className="text-xs text-muted-foreground">Know what you buy</p>
         </div>
         
