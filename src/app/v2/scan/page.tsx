@@ -88,9 +88,17 @@ export default function ScanPage() {
     const savedProductId = localStorage.getItem('incompleteScanProductId');
     const savedInstructions = localStorage.getItem('cameraInstructions');
     
+    console.log('[Scan] 🔄 Mount - checking for incomplete scan');
+    console.log('[Scan] 📋 localStorage on mount:', {
+      incompleteScanProductId: savedProductId,
+      cameraInstructions: savedInstructions,
+    });
+    
     if (savedProductId) {
       setIncompleteScanProductId(savedProductId);
       console.log('[Scan] 🔄 Restored incomplete scan state:', savedProductId);
+    } else {
+      console.log('[Scan] 📝 No incomplete scan found');
     }
     
     if (savedInstructions) {
@@ -226,6 +234,10 @@ export default function ScanPage() {
     }
     
     console.log('[Scan] 📸 Image captured, preparing to redirect');
+    console.log('[Scan] 📋 Current state:', {
+      incompleteScanProductId,
+      willPassProductId: !!incompleteScanProductId,
+    });
     
     // Close scanner first
     setShowScanner(false);
@@ -235,9 +247,12 @@ export default function ScanPage() {
     localStorage.setItem('scanImage', scanData.image);
     if (incompleteScanProductId) {
       localStorage.setItem('scanProductId', incompleteScanProductId);
+      console.log('[Scan] 💾 Saved scanProductId for completion:', incompleteScanProductId);
+    } else {
+      console.log('[Scan] 📝 New scan (no incompleteScanProductId)');
     }
     
-    console.log('[Scan] � Redirecting to results page');
+    console.log('[Scan] 🔄 Redirecting to results page');
     
     // Small delay to ensure scanner is closed before navigation
     setTimeout(() => {

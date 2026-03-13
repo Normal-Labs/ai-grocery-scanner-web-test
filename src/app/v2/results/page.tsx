@@ -8,7 +8,7 @@
  * Handles scan processing with loading indicator.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { ResultsScreen } from '@/components/v2/ResultsScreen';
 
@@ -49,17 +49,26 @@ export default function ResultsPage() {
   const [processingStatus, setProcessingStatus] = useState<string>('Analyzing product...');
   const [incompleteScanProductId, setIncompleteScanProductId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const processingRef = useRef(false); // Lock to prevent duplicate processing
 
   useEffect(() => {
     checkAndProcessScan();
   }, []);
 
   const checkAndProcessScan = async () => {
+    // Prevent duplicate processing (React Strict Mode double-render)
+    if (processingRef.current) {
+      console.log('[Results] ⏭️ Already processing, skipping duplicate call');
+      return;
+    }
+    
     try {
       // Check if there's a scan being processed
       const isProcessing = localStorage.getItem('scanProcessing');
       
       if (isProcessing === 'true') {
+        // Set lock before processing
+        processingRef.current = true;
         // Process the scan
         await processScan();
       } else {
@@ -70,6 +79,7 @@ export default function ResultsPage() {
       console.error('[Results] Error checking scan state:', error);
       setError(error instanceof Error ? error.message : 'Unknown error');
       setLoading(false);
+      processingRef.current = false; // Release lock on error
     }
   };
 
@@ -85,6 +95,11 @@ export default function ResultsPage() {
       }
       
       console.log('[Results] 🔄 Processing scan...');
+      console.log('[Results] 📋 localStorage state:', {
+        hasScanImage: !!image,
+        scanProductId: productId,
+        incompleteScanProductId: localStorage.getItem('incompleteScanProductId'),
+      });
       setProcessingStatus('Extracting product information...');
       
       // Calculate image size
@@ -95,6 +110,8 @@ export default function ResultsPage() {
       if (productId) {
         requestBody.productId = productId;
         console.log('[Results] 🔄 Completing scan for product:', productId);
+      } else {
+        console.log('[Results] 📝 New scan (no productId)');
       }
       
       // Call API endpoint
@@ -117,6 +134,14 @@ export default function ResultsPage() {
       
       const data = await response.json();
       
+      console.log('[Results] 📦 API Response:', {
+        productId: data.productId,
+        oldProductId: data.oldProductId,
+        savedToDb: data.savedToDb,
+        cached: data.cached,
+        skippedUpdate: data.skippedUpdate,
+      });
+      
       const extractionResult: AllExtractionResult = {
         cached: data.cached,
         cacheAge: data.cacheAge,
@@ -133,8 +158,8 @@ export default function ResultsPage() {
         timestamp: new Date(),
       };
       
-      // Save to history
-      saveToHistory(extractionResult);
+      // Save to history (pass oldProductId for reconciliation)
+      saveToHistory(extractionResult, data.oldProductId);
       
       // Save result to localStorage
       localStorage.setItem('currentScanResult', JSON.stringify(extractionResult));
@@ -146,6 +171,12 @@ export default function ResultsPage() {
       
       // Check if scan is incomplete
       const incomplete = isIncomplete(extractionResult.steps);
+      console.log('[Results] 📊 Scan completeness check:', {
+        incomplete,
+        productId: extractionResult.productId,
+        missingSteps: incomplete ? getMissingSteps(extractionResult.steps) : [],
+      });
+      
       if (incomplete && extractionResult.productId) {
         setIncompleteScanProductId(extractionResult.productId);
         const missing = getMissingSteps(extractionResult.steps);
@@ -156,6 +187,7 @@ export default function ResultsPage() {
         localStorage.setItem('cameraInstructions', instructions);
         
         console.log('[Results] ⚠️ Incomplete scan detected. Missing:', missing);
+        console.log('[Results] 💾 Saved incompleteScanProductId:', extractionResult.productId);
       } else if (extractionResult.productId && !incomplete) {
         // Scan is complete, clear incomplete state
         localStorage.removeItem('incompleteScanProductId');
@@ -188,13 +220,19 @@ export default function ResultsPage() {
         const resultData = JSON.parse(resultJson);
         setResult(resultData);
         
+        console.log('[Results] 📜 Loaded existing result from localStorage');
+        
         // Check if scan is incomplete
         const incomplete = isIncomplete(resultData.steps);
         if (incomplete && resultData.productId) {
           setIncompleteScanProductId(resultData.productId);
+          console.log('[Results] ⚠️ Loaded incomplete scan, productId:', resultData.productId);
+        } else {
+          console.log('[Results] ✅ Loaded complete scan');
         }
       } else {
         // No result found, redirect to home
+        console.log('[Results] ❌ No result found, redirecting to home');
         router.push('/v2');
       }
     } catch (error) {
@@ -258,30 +296,47 @@ export default function ResultsPage() {
     return score;
   };
 
-  const saveToHistory = (extractionResult: AllExtractionResult) => {
+  const saveToHistory = (extractionResult: AllExtractionResult, oldProductId?: string) => {
     try {
       // Get product name and brand - API returns productName (camelCase)
       const name = extractionResult.steps.packaging.data?.productName || extractionResult.steps.packaging.data?.product_name || 'Unknown Product';
       const brand = extractionResult.steps.packaging.data?.brand || 'Unknown Brand';
       const barcode = extractionResult.steps.barcode.data?.barcode;
 
+      console.log('[Results] 💾 Saving to history:', {
+        productId: extractionResult.productId,
+        oldProductId,
+        barcode,
+        name,
+        brand,
+      });
+
       // Get existing history
       const historyJson = localStorage.getItem('scanHistory');
       const history = historyJson ? JSON.parse(historyJson) : [];
 
-      // Check for duplicates
-      const isDuplicate = (item: any) => {
-        if (extractionResult.productId && item.productId) {
-          return item.productId === extractionResult.productId;
-        }
-        if (barcode && item.barcode) {
-          return item.barcode === barcode;
-        }
-        return item.name === name && item.brand === brand;
-      };
+      console.log('[Results] 📋 Current history count:', history.length);
 
-      // Filter out duplicates
-      const filteredHistory = history.filter((item: any) => !isDuplicate(item));
+      // Remove entries matching either the current productId or the old productId
+      let filteredHistory = history;
+      if (extractionResult.productId) {
+        filteredHistory = filteredHistory.filter((item: any) => item.productId !== extractionResult.productId);
+      }
+      if (oldProductId) {
+        const beforeOldFilter = filteredHistory.length;
+        filteredHistory = filteredHistory.filter((item: any) => item.productId !== oldProductId);
+        const removedOld = beforeOldFilter - filteredHistory.length;
+        if (removedOld > 0) {
+          console.log('[Results] 🗑️ Removed', removedOld, 'entries with old productId:', oldProductId);
+        }
+      }
+
+      const removed = history.length - filteredHistory.length;
+      if (removed > 0) {
+        console.log('[Results] 🗑️ Removed', removed, 'total existing entries');
+      }
+
+      console.log('[Results] 📋 After filtering by productId:', filteredHistory.length);
 
       // Create new history item
       const historyItem = {
@@ -306,6 +361,7 @@ export default function ResultsPage() {
       
       const wasUpdate = history.length > filteredHistory.length;
       console.log('[Results] 💾', wasUpdate ? 'Updated existing item in history' : 'Saved new item to history');
+      console.log('[Results] 📋 Final history count:', trimmedHistory.length);
     } catch (error) {
       console.error('[Results] ❌ Failed to save to history:', error);
     }
@@ -319,6 +375,16 @@ export default function ResultsPage() {
   };
 
   const handleCompleteScan = () => {
+    console.log('[Results] 🔄 User clicked Complete Scan button');
+    console.log('[Results] 📋 Current incompleteScanProductId:', incompleteScanProductId);
+    console.log('[Results] 📋 localStorage incompleteScanProductId:', localStorage.getItem('incompleteScanProductId'));
+    
+    // Store the current result for reference when completing
+    if (result && incompleteScanProductId) {
+      localStorage.setItem('incompleteResult', JSON.stringify(result));
+      console.log('[Results] 💾 Saved incomplete result for completion');
+    }
+    
     // Navigate to scan page which will auto-open camera
     router.push('/v2/scan');
   };

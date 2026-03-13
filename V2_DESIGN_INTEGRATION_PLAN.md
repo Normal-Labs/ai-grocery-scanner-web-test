@@ -15,6 +15,8 @@ The V2 Design folder contains a complete redesign of the product scanner interfa
   - LocalStorage for incomplete scans
   - History page with last 10 scans
   - Buy Me a Coffee integration in footer
+  - **Barcode reconciliation**: Automatically deletes incomplete products when barcode matches existing cached product
+  - **React Strict Mode protection**: Uses `useRef` locks to prevent duplicate API calls during development
 - **Tech Stack**: Next.js 16, TypeScript, Tailwind CSS, MongoDB, Vertex AI
 
 ### V2 Design (Mockup)

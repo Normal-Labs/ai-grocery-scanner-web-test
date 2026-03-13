@@ -123,6 +123,14 @@ export default function V2LandingPage() {
     }
   };
 
+  const handleNewScan = () => {
+    // Clear incomplete scan state when starting a fresh scan
+    localStorage.removeItem('incompleteScanProductId');
+    localStorage.removeItem('cameraInstructions');
+    console.log('[Home] 🆕 Starting new scan - cleared incomplete scan state');
+    router.push('/v2/scan');
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       <div className="max-w-md mx-auto w-full min-h-screen flex flex-col bg-background shadow-xl">
@@ -176,7 +184,7 @@ export default function V2LandingPage() {
         <div className="relative">
           {/* Scan button - central camera icon */}
           <button
-            onClick={() => router.push('/v2/scan')}
+            onClick={handleNewScan}
             className="w-36 h-36 rounded-full bg-primary flex items-center justify-center shadow-lg hover:scale-105 transition-transform active:scale-95"
           >
             <Camera className="w-14 h-14 text-primary-foreground" />
@@ -193,7 +201,7 @@ export default function V2LandingPage() {
       <div className="px-5 pb-8">
         <Button 
           className="w-full h-12 rounded-xl" 
-          onClick={() => router.push('/v2/scan')}
+          onClick={handleNewScan}
         >
           <Camera className="w-5 h-5 mr-2" />
           Scan

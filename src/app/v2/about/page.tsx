@@ -6,7 +6,7 @@
  * Information about the app and its features.
  */
 
-import { ChevronLeft, Sparkles, Shield, Zap, Heart } from 'lucide-react';
+import { ChevronLeft, Sparkles, Shield, Zap, Heart, Camera } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { HamburgerMenu } from '@/components/v2/HamburgerMenu';
 
@@ -32,7 +32,7 @@ export default function AboutPage() {
         </div>
 
         {/* Content */}
-        <div className="px-5 py-6 space-y-6">
+        <div className="px-5 py-6 space-y-6 pb-24">{/* Added pb-24 for footer space */}
           {/* App Info */}
           <div className="text-center pb-6 border-b border-border">
             <div className="w-20 h-20 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
@@ -119,6 +119,25 @@ export default function AboutPage() {
             <p className="text-xs text-muted-foreground mt-1">
               Made with ❤️ for healthier choices
             </p>
+            <a 
+              href="mailto:contact@normallabs.io"
+              className="text-xs text-primary hover:underline mt-2 inline-block"
+            >
+              contact@normallabs.io
+            </a>
+          </div>
+        </div>
+
+        {/* Fixed Footer */}
+        <div className="fixed bottom-0 left-0 right-0 bg-background border-t border-border">
+          <div className="max-w-md mx-auto px-5 py-4">
+            <button
+              onClick={() => router.push('/v2/scan')}
+              className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
+            >
+              <Camera className="w-5 h-5" />
+              Scan
+            </button>
           </div>
         </div>
       </div>

@@ -282,6 +282,26 @@ export async function POST(request: NextRequest) {
                 console.log('[Test All API] 📅 Cache age:', Math.floor(cacheAge / (24 * 60 * 60 * 1000)), 'days');
                 console.log('[Test All API] 📊 Cached completeness score:', cachedScore);
 
+                // RECONCILIATION: If we're completing an incomplete scan (productId provided)
+                // but found a different complete product by barcode, delete the incomplete one
+                if (productId && productId !== cachedProduct.id) {
+                  console.log('[Test All API] 🔄 Reconciling: Deleting incomplete product', productId, 'in favor of cached product', cachedProduct.id);
+                  try {
+                    const { error: deleteError } = await supabase
+                      .from('products')
+                      .delete()
+                      .eq('id', productId);
+                    
+                    if (deleteError) {
+                      console.error('[Test All API] ❌ Failed to delete incomplete product:', deleteError);
+                    } else {
+                      console.log('[Test All API] ✅ Deleted incomplete product:', productId);
+                    }
+                  } catch (deleteErr) {
+                    console.error('[Test All API] ❌ Error deleting incomplete product:', deleteErr);
+                  }
+                }
+
                 // Return cached data
                 const totalProcessingTime = Date.now() - startTime;
                 return NextResponse.json({
@@ -293,6 +313,7 @@ export async function POST(request: NextRequest) {
                   processingDimension: cachedProduct.metadata?.processing_dimension,
                   allergensDimension: cachedProduct.metadata?.allergens_dimension,
                   productId: cachedProduct.id,
+                  oldProductId: productId && productId !== cachedProduct.id ? productId : undefined, // Return old ID for client-side cleanup
                   savedToDb: true,
                   totalProcessingTime,
                 });

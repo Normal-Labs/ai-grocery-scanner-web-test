@@ -243,6 +243,84 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
         </div>
       )}
 
+      {/* Extraction Status */}
+      <div className="px-5 pb-5">
+        <h3 className="text-sm font-semibold text-foreground mb-3">Extraction Status</h3>
+        <div className="bg-card rounded-2xl border border-border divide-y divide-border">
+          {/* Barcode */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-foreground">Barcode</span>
+            <div className="flex items-center gap-2">
+              {result.steps.barcode.status === 'success' ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-success" />
+                  <span className="text-xs text-success">Captured</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-destructive" />
+                  <span className="text-xs text-destructive">Missing</span>
+                </>
+              )}
+            </div>
+          </div>
+          
+          {/* Packaging */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-foreground">Product Info</span>
+            <div className="flex items-center gap-2">
+              {result.steps.packaging.status === 'success' ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-success" />
+                  <span className="text-xs text-success">Captured</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-destructive" />
+                  <span className="text-xs text-destructive">Missing</span>
+                </>
+              )}
+            </div>
+          </div>
+          
+          {/* Ingredients */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-foreground">Ingredients</span>
+            <div className="flex items-center gap-2">
+              {result.steps.ingredients.status === 'success' ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-success" />
+                  <span className="text-xs text-success">Captured</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-destructive" />
+                  <span className="text-xs text-destructive">Missing</span>
+                </>
+              )}
+            </div>
+          </div>
+          
+          {/* Nutrition */}
+          <div className="flex items-center justify-between px-4 py-3">
+            <span className="text-sm text-foreground">Nutrition Facts</span>
+            <div className="flex items-center gap-2">
+              {result.steps.nutrition.status === 'success' ? (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-success" />
+                  <span className="text-xs text-success">Captured</span>
+                </>
+              ) : (
+                <>
+                  <div className="w-2 h-2 rounded-full bg-destructive" />
+                  <span className="text-xs text-destructive">Missing</span>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
       {/* Score Cards */}
       <div className="px-5 pb-5 space-y-3">
         {/* Health Score */}
