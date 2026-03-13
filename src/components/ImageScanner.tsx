@@ -4,10 +4,12 @@
  * Image Scanner Component
  * 
  * Simple camera interface for capturing product images.
- * Similar to BarcodeScanner but without barcode detection.
+ * V2 Design with clean, minimal UI.
  */
 
 import { useState, useRef, useEffect } from 'react';
+import { X, ImageIcon } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 interface ImageScannerProps {
   onScanComplete: (result: { image?: string; imageMimeType?: string }) => void;
@@ -18,14 +20,17 @@ interface ImageScannerProps {
 }
 
 export default function ImageScanner({ onScanComplete, onError, onClose, scanType = 'packaging', instruction }: ImageScannerProps) {
+  const router = useRouter();
   const [isScanning, setIsScanning] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [useFileInput, setUseFileInput] = useState(false);
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-start camera
   useEffect(() => {
@@ -104,10 +109,46 @@ export default function ImageScanner({ onScanComplete, onError, onClose, scanTyp
   const stopCamera = () => {
     cleanupCamera();
     
-    // Notify parent to close the scanner
+    // Notify parent to close if callback provided
     if (onClose) {
       onClose();
     }
+  };
+
+  // Handle file input for gallery
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setProcessing(true);
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageData = e.target?.result as string;
+      
+      console.log('[Image Scanner] 📸 Image loaded from gallery');
+      
+      setCapturedImage(imageData);
+      stopCamera();
+      
+      // Return captured image
+      onScanComplete({
+        image: imageData,
+        imageMimeType: file.type || 'image/jpeg',
+      });
+      
+      setProcessing(false);
+    };
+    
+    reader.onerror = () => {
+      console.error('[Image Scanner] ❌ Failed to read file');
+      if (onError) {
+        onError('Failed to read image file');
+      }
+      setProcessing(false);
+    };
+    
+    reader.readAsDataURL(file);
   };
 
   // Capture image from video
@@ -194,16 +235,18 @@ export default function ImageScanner({ onScanComplete, onError, onClose, scanTyp
         </div>
       )}
 
-      {/* Video Preview */}
+      {/* Video Preview - V2 Design */}
       {isScanning && !capturedImage && (
         <div className="relative flex-1 flex flex-col bg-black overflow-hidden">
-          {/* Close button - top right */}
-          <button
-            onClick={stopCamera}
-            className="absolute top-4 right-4 z-10 px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors shadow-lg"
-          >
-            ✕ Close
-          </button>
+          {/* Top controls */}
+          <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-5 py-4 pt-safe">
+            <button 
+              onClick={stopCamera}
+              className="w-10 h-10 rounded-full bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors"
+            >
+              <X className="w-5 h-5 text-white" />
+            </button>
+          </div>
 
           {/* Camera feed */}
           <video
@@ -214,31 +257,41 @@ export default function ImageScanner({ onScanComplete, onError, onClose, scanTyp
             className="w-full h-full object-cover"
           />
 
-          {/* Bottom controls - fixed with safe area */}
-          <div className="absolute bottom-0 left-0 right-0 pb-safe">
-            <div className="p-6 bg-gradient-to-t from-black via-black/80 to-transparent">
-              {/* Instruction text */}
-              <p className="text-center text-white text-base mb-4 font-medium">
-                {instruction || `Point camera at ${scanType} and take a picture`}
-              </p>
-
-              {/* Action buttons */}
-              <div className="flex gap-4 justify-center items-center">
-                <button
-                  onClick={stopCamera}
-                  className="px-8 py-4 bg-red-600 text-white rounded-full font-semibold hover:bg-red-700 active:bg-red-800 transition-colors text-lg shadow-lg min-w-[140px]"
-                >
-                  ✕ Cancel
-                </button>
-                
-                <button
-                  onClick={captureImage}
-                  disabled={processing}
-                  className="px-8 py-4 bg-white text-gray-900 rounded-full font-semibold hover:bg-gray-100 active:bg-gray-200 disabled:bg-gray-400 disabled:text-gray-600 transition-colors text-lg shadow-lg min-w-[140px]"
-                >
-                  {processing ? '⏳ Processing...' : '📷 Capture'}
-                </button>
+          {/* Bottom controls - V2 Design */}
+          <div className="absolute bottom-0 left-0 right-0 z-10 px-5 pb-10 pb-safe">
+            {/* Instruction text with background */}
+            <div className="mb-6 mx-auto max-w-xs">
+              <div className="bg-black/40 backdrop-blur-sm rounded-2xl px-4 py-3">
+                <p className="text-sm font-medium text-white text-center">
+                  {instruction || 'Point at any product'}
+                </p>
+                <p className="text-xs text-white/80 text-center mt-1">
+                  or scan a barcode
+                </p>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between">
+              {/* Gallery button */}
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={processing}
+                className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center hover:bg-white/30 transition-colors disabled:opacity-50"
+              >
+                <ImageIcon className="w-5 h-5 text-white" />
+              </button>
+              
+              {/* Capture button - large center button */}
+              <button 
+                onClick={captureImage}
+                disabled={processing}
+                className="w-20 h-20 rounded-full bg-white flex items-center justify-center shadow-lg active:scale-95 transition-transform disabled:opacity-50"
+              >
+                <div className="w-16 h-16 rounded-full border-4 border-black" />
+              </button>
+              
+              {/* Spacer to balance layout (replaces flip camera button) */}
+              <div className="w-12 h-12" />
             </div>
           </div>
         </div>
@@ -254,6 +307,15 @@ export default function ImageScanner({ onScanComplete, onError, onClose, scanTyp
           />
         </div>
       )}
+
+      {/* Hidden file input for gallery */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleFileSelect}
+        className="hidden"
+      />
 
       {/* Hidden canvas for image capture */}
       <canvas ref={canvasRef} className="hidden" />
