@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react';
-import { Menu, X, Home, Info, History, Coffee } from 'lucide-react';
+import { Menu, X, Home, Info, History, Coffee, Scale } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export function HamburgerMenu() {
@@ -59,6 +59,16 @@ export function HamburgerMenu() {
           >
             <History className="w-4 h-4 text-muted-foreground" />
             History
+          </button>
+          <button
+            onClick={() => {
+              setMenuOpen(false);
+              router.push('/legal');
+            }}
+            className="w-full flex items-center gap-3 px-4 py-3 text-sm text-foreground hover:bg-secondary transition-colors text-left"
+          >
+            <Scale className="w-4 h-4 text-muted-foreground" />
+            Legal
           </button>
           <button
             onClick={() => {
