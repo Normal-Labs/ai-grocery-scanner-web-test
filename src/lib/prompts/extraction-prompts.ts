@@ -11,13 +11,14 @@
  * Extracts barcode numbers from product images using OCR.
  * Looks for UPC, EAN, or similar barcode formats.
  */
-export const BARCODE_EXTRACTION_PROMPT = `Extract the barcode number from this image.
+export const BARCODE_EXTRACTION_PROMPT = `Extract the official product barcode (UPC or EAN) from this image.
 
 INSTRUCTIONS:
-1. Look for a barcode (UPC, EAN, or similar)
-2. Extract ONLY the numeric digits below or near the barcode
-3. Return ONLY the barcode number, nothing else
-4. If you cannot find a barcode, return "NONE"
+1. TARGET: Look for a 12-digit (UPC-A) or 13-digit (EAN-13) number usually located near a series of vertical black lines.
+2. EXCLUSION ZONE: Ignore dates (MM/DD/YY), timestamps, or strings labeled "Lot", "Batch", or "EXP".
+3. VERIFICATION: If you see multiple numbers, prioritize the one that matches the standard barcode length and position.
+4. Return ONLY the numeric digits, nothing else.
+5. If no valid barcode is found, return "NONE".
 
 Return format: Just the barcode number (e.g., "012345678901")`;
 
@@ -30,15 +31,18 @@ Return format: Just the barcode number (e.g., "012345678901")`;
 export const PACKAGING_EXTRACTION_PROMPT = `Extract product packaging information from this image.
 
 INSTRUCTIONS:
-1. Identify the PRODUCT NAME (the main product title)
-2. Identify the BRAND (manufacturer or company name)
-3. Identify the SIZE/QUANTITY (e.g., "12 oz", "500g", "6 pack")
-4. Identify the CATEGORY (e.g., Beverages, Snacks, Dairy, Bakery, etc.)
-5. Identify the PACKAGING TYPE (e.g., bottle, can, box, bag, jar, carton)
+1. Identify the BRAND (the manufacturer or company name, e.g., "Mondelēz", "Nestlé").
+2. Identify the PRODUCT NAME.
+   - RULE: Use the most prominent text on the package.
+   - RULE: DO NOT return a single descriptor (like "Mini", "Original", or "Large") if it is part of a multi-word product title (e.g., return "Swedish Fish Mini", not just "Mini").
+   - RULE: Include flavor or variety if it's part of the main title (e.g., "Doritos Cool Ranch", not just "Doritos").
+3. Identify the SIZE/QUANTITY (e.g., "12 oz", "500g", "6 pack").
+4. Identify the CATEGORY (e.g., Beverages, Snacks, Dairy, Bakery, etc.).
+5. Identify the PACKAGING TYPE (e.g., bag, box, bottle, can, jar, carton).
 
-Return ONLY a JSON object with these fields:
+Return ONLY a JSON object:
 {
-  "productName": "extracted product name",
+  "productName": "full extracted product name",
   "brand": "extracted brand name",
   "size": "extracted size/quantity",
   "category": "inferred category",
@@ -47,11 +51,11 @@ Return ONLY a JSON object with these fields:
 }
 
 RULES:
-- Extract text exactly as it appears
-- Do not include label prefixes like "Product Name:" or "Brand:"
-- If a field cannot be determined, use null
-- Confidence should reflect overall extraction quality
-- Return ONLY the JSON object, no additional text`;
+- Prioritize visual hierarchy (larger text usually = product name).
+- If the brand and product name are visually merged, include both in the productName.
+- If a field cannot be determined, use null.
+- Confidence should reflect overall extraction quality.
+- Return ONLY the JSON object, no additional text.`;
 
 /**
  * Ingredients List Extraction Prompt
