@@ -20,6 +20,7 @@ import { getGeminiWrapper } from '@/lib/gemini-wrapper';
 import { combineExtractionPrompts } from '@/lib/prompts/extraction-prompts';
 import { getDimensionPrompt } from '@/lib/prompts/dimension-prompts';
 import { cacheService } from '@/lib/mongodb/cache-service';
+import { isValidBarcode } from '@/lib/utils/barcode-validator';
 import type { ProductData } from '@/lib/types/multi-tier';
 
 const supabase = createClient(
@@ -251,13 +252,13 @@ export async function POST(request: NextRequest) {
       let extractedBarcode: string | null = null;
       if (extractedData.barcode) {
         const barcodeMatch = extractedData.barcode.match(/\b\d{8,14}\b/);
-        if (barcodeMatch) {
+        if (barcodeMatch && isValidBarcode(barcodeMatch[0])) {
           extractedBarcode = barcodeMatch[0];
           productData.barcode = extractedBarcode;
           steps.barcode.status = 'success';
           steps.barcode.data = { barcode: extractedBarcode };
           steps.barcode.confidence = 0.9;
-          console.log('[Test All API] ✅ Barcode found:', extractedBarcode);
+          console.log('[Test All API] ✅ Barcode found and validated:', extractedBarcode);
 
           // CHECK CACHE: Look for existing product with this barcode
           try {
@@ -327,8 +328,15 @@ export async function POST(request: NextRequest) {
             console.log('[Test All API] ⚠️ Cache lookup failed, continuing with fresh extraction:', cacheError);
           }
         } else {
-          steps.barcode.status = 'failed';
-          steps.barcode.error = 'No valid barcode detected';
+          const rawMatch = extractedData.barcode.match(/\b\d{8,14}\b/);
+          if (rawMatch) {
+            console.log('[Test All API] ⚠️ Barcode failed checksum validation:', rawMatch[0]);
+            steps.barcode.status = 'failed';
+            steps.barcode.error = 'Barcode failed Mod-10 checksum validation';
+          } else {
+            steps.barcode.status = 'failed';
+            steps.barcode.error = 'No valid barcode detected';
+          }
         }
       } else {
         steps.barcode.status = 'failed';

@@ -1,7 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32">
+<<<<<<< HEAD
   <rect width="32" height="32" rx="8" fill="#171717"/>
   <rect x="8" y="12" width="16" height="12" rx="2" fill="none" stroke="#ffffff" stroke-width="1.5"/>
   <circle cx="16" cy="18" r="3.5" fill="none" stroke="#ffffff" stroke-width="1.5"/>
   <path d="M12 12l1.5-3h5l1.5 3" fill="none" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/>
   <circle cx="21" cy="14" r="0.75" fill="#ffffff"/>
+=======
+  <rect width="32" height="32" rx="8" fill="#18181b"/>
+  <path d="M12.5 10L11 12H8.5C7.67 12 7 12.67 7 13.5V22.5C7 23.33 7.67 24 8.5 24H23.5C24.33 24 25 23.33 25 22.5V13.5C25 12.67 24.33 12 23.5 12H21L19.5 10H12.5Z" fill="none" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+  <circle cx="16" cy="18" r="3.5" fill="none" stroke="white" stroke-width="1.5"/>
+>>>>>>> dev
 </svg>

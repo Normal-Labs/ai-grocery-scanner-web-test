@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI Prodcut Scanner",
+  title: "AI Product Scanner",
   description: "Know what you buy",
 };
 

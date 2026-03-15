@@ -115,7 +115,7 @@ export default function ResultsPage() {
       }
       
       // Call API endpoint
-      const response = await fetch('/api/test-all-extraction', {
+      const response = await fetch('/api/extract', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
