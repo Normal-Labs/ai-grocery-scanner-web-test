@@ -180,6 +180,18 @@ git push origin main
 6. ✅ Should merge data correctly
 7. ✅ Should show complete product
 
+**Test 3b: Targeted Re-Scan**
+1. After scanning, check Extraction Status section
+2. ✅ Each row should have a small round camera icon button
+3. Tap the camera icon on a row (e.g., "Ingredients")
+4. ✅ Button should expand to show "Re-Scan"
+5. Tap away from the button
+6. ✅ Button should collapse back to camera icon
+7. Tap the camera icon again, then tap "Re-Scan"
+8. ✅ Camera should open with targeted instruction (e.g., "Point camera at the ingredients list")
+9. Capture the image
+10. ✅ Should process and update results
+
 **Test 4: History**
 1. Click "History" button
 2. ✅ Should navigate to `/history`

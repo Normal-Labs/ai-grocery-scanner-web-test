@@ -7,6 +7,7 @@
  * Shows health scores, allergens, nutrition, and ingredients.
  */
 
+import { useState, useEffect, useRef } from 'react';
 import { ChevronLeft, Heart, AlertTriangle, Leaf, ShieldCheck, Zap, Camera } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
@@ -75,9 +76,56 @@ interface ResultsScreenProps {
   onBack: () => void;
   onCompleteScan?: () => void;
   showCompleteScanButton?: boolean;
+  onRescanStep?: (step: 'barcode' | 'packaging' | 'ingredients' | 'nutrition') => void;
 }
 
-export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScanButton }: ResultsScreenProps) {
+type StepKey = 'barcode' | 'packaging' | 'ingredients' | 'nutrition';
+
+/**
+ * Animated re-scan button for each extraction status row.
+ * Tap once to expand to "Re-Scan", tap again to trigger the re-scan.
+ * Tapping away collapses it back to the camera icon.
+ */
+function RescanButton({ step, onRescan }: { step: StepKey; onRescan: (step: StepKey) => void }) {
+  const [expanded, setExpanded] = useState(false);
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!expanded) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setExpanded(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [expanded]);
+
+  return (
+    <button
+      ref={ref}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (expanded) {
+          onRescan(step);
+        } else {
+          setExpanded(true);
+        }
+      }}
+      className={`flex items-center gap-1.5 rounded-full border border-border transition-all duration-200 ease-in-out ${
+        expanded
+          ? 'px-3 py-1 bg-primary text-primary-foreground border-primary'
+          : 'w-7 h-7 justify-center bg-muted/50 hover:bg-muted'
+      }`}
+      aria-label={expanded ? `Re-scan ${step}` : `Open re-scan for ${step}`}
+    >
+      <Camera className="w-3.5 h-3.5 shrink-0" />
+      {expanded && <span className="text-xs font-medium whitespace-nowrap">Re-Scan</span>}
+    </button>
+  );
+}
+
+export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScanButton, onRescanStep }: ResultsScreenProps) {
   // Extract product info from steps
   const packagingData = result.steps.packaging?.data;
   const barcodeData = result.steps.barcode?.data;
@@ -262,6 +310,9 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
                   <span className="text-xs text-destructive">Missing</span>
                 </>
               )}
+              {onRescanStep && (
+                <RescanButton step="barcode" onRescan={onRescanStep} />
+              )}
             </div>
           </div>
           
@@ -279,6 +330,9 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
                   <div className="w-2 h-2 rounded-full bg-destructive" />
                   <span className="text-xs text-destructive">Missing</span>
                 </>
+              )}
+              {onRescanStep && (
+                <RescanButton step="packaging" onRescan={onRescanStep} />
               )}
             </div>
           </div>
@@ -298,6 +352,9 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
                   <span className="text-xs text-destructive">Missing</span>
                 </>
               )}
+              {onRescanStep && (
+                <RescanButton step="ingredients" onRescan={onRescanStep} />
+              )}
             </div>
           </div>
           
@@ -315,6 +372,9 @@ export function ResultsScreen({ result, onBack, onCompleteScan, showCompleteScan
                   <div className="w-2 h-2 rounded-full bg-destructive" />
                   <span className="text-xs text-destructive">Missing</span>
                 </>
+              )}
+              {onRescanStep && (
+                <RescanButton step="nutrition" onRescan={onRescanStep} />
               )}
             </div>
           </div>
