@@ -614,26 +614,52 @@ export class ScanOrchestrator {
 
     // Step 3: Upsert product to Supabase (only if barcode provided)
     // Requirement 5.6: Save or update product metadata in Supabase
+    // Smart merge: don't overwrite existing product name/brand with potentially worse data
     let product;
     
     if (request.barcode) {
       try {
-        product = await withRetry(
-          async () => await this.productRepo.upsert({
-            barcode: request.barcode!,
-            name: firstProduct.productName,
-            // Extract brand from product name if possible (simple heuristic)
-            brand: this.extractBrand(firstProduct.productName) || 'Unknown',
-          }),
+        // First check if product already exists
+        const existingProduct = await withRetry(
+          async () => await this.productRepo.findByBarcode(request.barcode!),
           3,
           1000
         );
-        
-        console.log('[ScanOrchestrator] Saved product to Supabase:', {
-          barcode: request.barcode,
-          productId: product.id,
-          productName: product.name,
-        });
+
+        if (existingProduct) {
+          // Product exists - only update the scan timestamp, preserve name/brand
+          await withRetry(
+            async () => await this.productRepo.updateLastScanned(request.barcode!),
+            3,
+            1000
+          );
+          product = { ...existingProduct, last_scanned_at: new Date().toISOString() };
+          
+          console.log('[ScanOrchestrator] Updated existing product scan timestamp:', {
+            barcode: request.barcode,
+            productId: product.id,
+            existingName: product.name,
+            newScanName: firstProduct.productName,
+            action: 'preserved_existing',
+          });
+        } else {
+          // New product - do full insert
+          product = await withRetry(
+            async () => await this.productRepo.upsert({
+              barcode: request.barcode!,
+              name: firstProduct.productName,
+              brand: this.extractBrand(firstProduct.productName) || 'Unknown',
+            }),
+            3,
+            1000
+          );
+          
+          console.log('[ScanOrchestrator] Saved new product to Supabase:', {
+            barcode: request.barcode,
+            productId: product.id,
+            productName: product.name,
+          });
+        }
         console.log('💾 [DATABASE] Saved product metadata to Supabase');
       } catch (error) {
         // Requirement 10.5: Log all database errors with context

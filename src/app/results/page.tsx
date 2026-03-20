@@ -389,6 +389,34 @@ export default function ResultsPage() {
     router.push('/scan');
   };
 
+  const handleRescanStep = (step: 'barcode' | 'packaging' | 'ingredients' | 'nutrition') => {
+    console.log('[Results] 🎯 User requested targeted re-scan for:', step);
+    
+    const productId = result?.productId || incompleteScanProductId;
+    
+    // Store the current result for reference
+    if (result && productId) {
+      localStorage.setItem('incompleteResult', JSON.stringify(result));
+      localStorage.setItem('incompleteScanProductId', productId);
+    }
+    
+    // Set targeted instruction for just this step
+    const stepInstructions: Record<string, string> = {
+      barcode: 'Point camera at the barcode and take a picture',
+      packaging: 'Point camera at the product name and brand and take a picture',
+      ingredients: 'Point camera at the ingredients list and take a picture',
+      nutrition: 'Point camera at the nutrition facts label and take a picture',
+    };
+    
+    localStorage.setItem('cameraInstructions', stepInstructions[step]);
+    if (productId) {
+      localStorage.setItem('scanProductId', productId);
+    }
+    
+    // Navigate to scan page
+    router.push('/scan');
+  };
+
   const handleRetry = () => {
     setError(null);
     router.push('/scan');
@@ -446,6 +474,7 @@ export default function ResultsPage() {
           onBack={handleBack}
           onCompleteScan={handleCompleteScan}
           showCompleteScanButton={!!incompleteScanProductId && isIncomplete(result.steps)}
+          onRescanStep={handleRescanStep}
         />
       </div>
     </div>

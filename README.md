@@ -6,6 +6,7 @@ A mobile-first web application that enables consumers to capture images of groce
 
 - 📸 **Camera Capture**: Use your device camera to scan grocery products (no barcode entry required)
 - 🦸 **Product Hero Mode**: Guided multi-image capture workflow (barcode → packaging → nutrition label) for complete product profiles
+- 🎯 **Targeted Re-Scan**: Re-scan individual extraction areas (barcode, product info, ingredients, nutrition) directly from the results screen
 - 🤖 **AI Analysis**: Powered by Google's Gemini 2.0 Flash with Research Agent for deep product insights
 - 🥗 **Nutrition Label Analysis**: Scan nutrition facts labels for instant health scoring, allergen detection, and ingredient analysis
 - 🏷️ **Smart Badges**: Visual indicators for Health, Sustainability, Carbon Impact, Preservatives, and Allergens
@@ -207,7 +208,7 @@ See [REQUIRED_ENV_VARS.md](REQUIRED_ENV_VARS.md) for a quick reference guide.
 3. Check MongoDB cache for existing insights
 4. If cache hit: Return instant results ⚡
 5. If cache miss: Call Gemini AI → Save to cache → Return results
-6. Product metadata saved to Supabase for tracking
+6. Product metadata saved to Supabase for tracking (smart merge: existing product names/brands are preserved, only timestamps updated)
 
 **Data Sources:**
 - **MongoDB**: AI-generated insights cache (30-day TTL)
