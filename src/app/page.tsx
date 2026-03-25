@@ -114,6 +114,7 @@ export default function HomePage() {
 
       // Save to localStorage for results page
       localStorage.setItem('currentScanResult', JSON.stringify(extractionResult));
+      localStorage.setItem('isExampleProduct', 'true');
 
       // Navigate to results page
       router.push('/results');
@@ -127,6 +128,7 @@ export default function HomePage() {
     // Clear incomplete scan state when starting a fresh scan
     localStorage.removeItem('incompleteScanProductId');
     localStorage.removeItem('cameraInstructions');
+    localStorage.removeItem('isExampleProduct');
     console.log('[Home] 🆕 Starting new scan - cleared incomplete scan state');
     router.push('/scan');
   };

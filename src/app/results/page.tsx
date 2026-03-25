@@ -48,6 +48,7 @@ export default function ResultsPage() {
   const [loading, setLoading] = useState(true);
   const [processingStatus, setProcessingStatus] = useState<string>('Analyzing product...');
   const [incompleteScanProductId, setIncompleteScanProductId] = useState<string | null>(null);
+  const [isExampleProduct, setIsExampleProduct] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const processingRef = useRef(false); // Lock to prevent duplicate processing
 
@@ -168,6 +169,7 @@ export default function ResultsPage() {
       localStorage.removeItem('scanProcessing');
       localStorage.removeItem('scanImage');
       localStorage.removeItem('scanProductId');
+      localStorage.removeItem('isExampleProduct');
       
       // Check if scan is incomplete
       const incomplete = isIncomplete(extractionResult.steps);
@@ -216,11 +218,13 @@ export default function ResultsPage() {
     try {
       // Check for result in localStorage
       const resultJson = localStorage.getItem('currentScanResult');
+      const isExample = localStorage.getItem('isExampleProduct') === 'true';
       if (resultJson) {
         const resultData = JSON.parse(resultJson);
         setResult(resultData);
+        setIsExampleProduct(isExample);
         
-        console.log('[Results] 📜 Loaded existing result from localStorage');
+        console.log('[Results] 📜 Loaded existing result from localStorage', isExample ? '(example product)' : '');
         
         // Check if scan is incomplete
         const incomplete = isIncomplete(resultData.steps);
@@ -472,9 +476,9 @@ export default function ResultsPage() {
         <ResultsScreen 
           result={result}
           onBack={handleBack}
-          onCompleteScan={handleCompleteScan}
-          showCompleteScanButton={!!incompleteScanProductId && isIncomplete(result.steps)}
-          onRescanStep={handleRescanStep}
+          onCompleteScan={isExampleProduct ? undefined : handleCompleteScan}
+          showCompleteScanButton={!isExampleProduct && !!incompleteScanProductId && isIncomplete(result.steps)}
+          onRescanStep={isExampleProduct ? undefined : handleRescanStep}
         />
       </div>
     </div>
