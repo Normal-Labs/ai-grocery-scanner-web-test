@@ -115,6 +115,13 @@ export default function ResultsPage() {
         console.log('[Results] 📝 New scan (no productId)');
       }
       
+      // Check for targeted rescan step
+      const targetStep = localStorage.getItem('targetStep');
+      if (targetStep) {
+        requestBody.targetStep = targetStep;
+        console.log('[Results] 🎯 Targeted rescan for step:', targetStep);
+      }
+      
       // Call API endpoint
       const response = await fetch('/api/extract', {
         method: 'POST',
@@ -170,6 +177,7 @@ export default function ResultsPage() {
       localStorage.removeItem('scanImage');
       localStorage.removeItem('scanProductId');
       localStorage.removeItem('isExampleProduct');
+      localStorage.removeItem('targetStep');
       
       // Check if scan is incomplete
       const incomplete = isIncomplete(extractionResult.steps);
@@ -413,6 +421,7 @@ export default function ResultsPage() {
     };
     
     localStorage.setItem('cameraInstructions', stepInstructions[step]);
+    localStorage.setItem('targetStep', step);
     if (productId) {
       localStorage.setItem('scanProductId', productId);
     }

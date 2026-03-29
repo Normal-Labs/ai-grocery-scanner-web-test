@@ -17,7 +17,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getGeminiWrapper } from '@/lib/gemini-wrapper';
-import { combineExtractionPrompts } from '@/lib/prompts/extraction-prompts';
+import { combineExtractionPrompts, getExtractionPrompt } from '@/lib/prompts/extraction-prompts';
 import { getDimensionPrompt } from '@/lib/prompts/dimension-prompts';
 import { cacheService } from '@/lib/mongodb/cache-service';
 import { isValidBarcode } from '@/lib/utils/barcode-validator';
@@ -67,6 +67,7 @@ function shouldUpdateProduct(existingData: any, newData: any): boolean {
 interface AllExtractionRequest {
   image: string; // base64 image data
   productId?: string; // Optional: ID of product to update (for completing incomplete scans)
+  targetStep?: 'barcode' | 'packaging' | 'ingredients' | 'nutrition'; // Optional: run only this extraction step
 }
 
 interface ExtractionStep {
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest) {
 
   try {
     const body: AllExtractionRequest = await request.json();
-    const { image, productId } = body;
+    const { image, productId, targetStep } = body;
 
     if (!image) {
       return NextResponse.json(
@@ -171,6 +172,171 @@ export async function POST(request: NextRequest) {
     }
 
     const gemini = getGeminiWrapper();
+
+    // TARGETED RESCAN: If targetStep + productId are provided, run only that one prompt
+    if (targetStep && productId) {
+      console.log(`[Extract API] 🎯 Targeted rescan: step=${targetStep}, productId=${productId}`);
+      
+      // Fetch existing product
+      const { data: existingProduct, error: fetchError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', productId)
+        .single();
+
+      if (fetchError || !existingProduct) {
+        console.error('[Extract API] ❌ Product not found for targeted rescan:', fetchError);
+        return NextResponse.json(
+          { success: false, error: 'Product not found', steps, savedToDb: false, totalProcessingTime: Date.now() - startTime },
+          { status: 404 }
+        );
+      }
+
+      // Run only the targeted extraction prompt
+      const extractionStart = Date.now();
+      const prompt = getExtractionPrompt(targetStep);
+      const result = await gemini.generateContent({
+        prompt,
+        imageData: base64Data,
+        imageMimeType: 'image/jpeg',
+        maxRetries: 2,
+        retryDelayMs: 5000,
+      });
+
+      if (!result.success) {
+        console.error(`[Extract API] ❌ Targeted ${targetStep} extraction failed:`, result.error);
+        steps[targetStep].status = 'failed';
+        steps[targetStep].error = result.error;
+        return NextResponse.json(
+          { success: false, error: result.error, steps, savedToDb: false, totalProcessingTime: Date.now() - startTime },
+          { status: 500 }
+        );
+      }
+
+      let responseText = result.text!.trim();
+      if (responseText.includes('```json')) {
+        responseText = responseText.replace(/```json\s*/g, '').replace(/```\s*/g, '');
+      }
+      // Extract JSON object from response
+      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        responseText = jsonMatch[0];
+      }
+
+      let extractedData: any;
+      try {
+        extractedData = JSON.parse(responseText);
+      } catch {
+        // Non-JSON response (e.g. "NONE" from barcode prompt) — treat as raw text
+        console.log(`[Extract API] ⚠️ Non-JSON response for ${targetStep}: "${responseText.substring(0, 50)}"`);
+        extractedData = { rawText: responseText };
+      }
+      const extractionTime = Date.now() - extractionStart;
+      console.log(`[Extract API] ✅ Targeted ${targetStep} extraction completed in ${extractionTime}ms`);
+
+      // Build the update object — only touch the targeted field
+      const updateFields: any = {};
+      const mergedSteps = { ...existingProduct.metadata?.extraction_steps };
+
+      if (targetStep === 'barcode') {
+        const barcodeMatch = (typeof extractedData === 'string' ? extractedData : extractedData.barcode || responseText).match(/\b\d{8,14}\b/);
+        if (barcodeMatch && isValidBarcode(barcodeMatch[0])) {
+          updateFields.barcode = barcodeMatch[0];
+          steps.barcode.status = 'success';
+          steps.barcode.data = { barcode: barcodeMatch[0] };
+          steps.barcode.confidence = 0.9;
+        } else {
+          steps.barcode.status = 'failed';
+          steps.barcode.error = barcodeMatch ? 'Barcode failed Mod-10 checksum' : 'No valid barcode detected';
+        }
+        steps.barcode.processingTime = extractionTime;
+        mergedSteps.barcode = steps.barcode;
+      } else if (targetStep === 'packaging') {
+        if (extractedData.productName) {
+          updateFields.name = extractedData.productName;
+          updateFields.brand = extractedData.brand || existingProduct.brand;
+          updateFields.size = extractedData.size || existingProduct.size;
+          updateFields.category = extractedData.category || existingProduct.category;
+          steps.packaging.status = 'success';
+          steps.packaging.data = extractedData;
+          steps.packaging.confidence = extractedData.confidence || 0.5;
+        } else {
+          steps.packaging.status = 'failed';
+          steps.packaging.error = 'No product name detected';
+        }
+        steps.packaging.processingTime = extractionTime;
+        mergedSteps.packaging = steps.packaging;
+      } else if (targetStep === 'ingredients') {
+        if (extractedData.ingredients?.length > 0) {
+          const ingredients = [...extractedData.ingredients];
+          if (ingredients[0]) {
+            ingredients[0] = ingredients[0].replace(/^INGREDIENTS:\s*/i, '').replace(/^Ingredients:\s*/i, '').trim();
+          }
+          updateFields.ingredients = ingredients;
+          steps.ingredients.status = 'success';
+          steps.ingredients.data = extractedData;
+          steps.ingredients.confidence = extractedData.confidence || 0.5;
+        } else {
+          steps.ingredients.status = 'failed';
+          steps.ingredients.error = 'No ingredients found';
+        }
+        steps.ingredients.processingTime = extractionTime;
+        mergedSteps.ingredients = steps.ingredients;
+      } else if (targetStep === 'nutrition') {
+        if (extractedData.serving_size && extractedData.macros) {
+          updateFields.nutrition_facts = extractedData;
+          steps.nutrition.status = 'success';
+          steps.nutrition.data = extractedData;
+          steps.nutrition.confidence = extractedData.confidence || 0.5;
+        } else {
+          steps.nutrition.status = 'failed';
+          steps.nutrition.error = 'Incomplete nutrition facts';
+        }
+        steps.nutrition.processingTime = extractionTime;
+        mergedSteps.nutrition = steps.nutrition;
+      }
+
+      // Update the product with only the targeted fields
+      const { data: updatedProduct, error: updateError } = await supabase
+        .from('products')
+        .update({
+          ...updateFields,
+          updated_at: new Date().toISOString(),
+          metadata: {
+            ...existingProduct.metadata,
+            extraction_steps: mergedSteps,
+            last_update_reason: `targeted_rescan_${targetStep}`,
+          },
+        })
+        .eq('id', productId)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        console.error('[Extract API] ❌ Targeted update failed:', updateError);
+        return NextResponse.json(
+          { success: false, error: 'Database update failed', steps, savedToDb: false, totalProcessingTime: Date.now() - startTime },
+          { status: 500 }
+        );
+      }
+
+      console.log(`[Extract API] 💾 Targeted rescan saved for ${targetStep}`);
+
+      const totalProcessingTime = Date.now() - startTime;
+      return NextResponse.json({
+        success: true,
+        cached: false,
+        steps: updatedProduct.metadata?.extraction_steps || mergedSteps,
+        healthDimension: updatedProduct.metadata?.health_dimension,
+        processingDimension: updatedProduct.metadata?.processing_dimension,
+        allergensDimension: updatedProduct.metadata?.allergens_dimension,
+        productId: updatedProduct.id,
+        savedToDb: true,
+        totalProcessingTime,
+      });
+    }
+
+    // FULL EXTRACTION: Normal flow (no targetStep)
 
     // Accumulated product data
     let productData: any = {
@@ -659,22 +825,22 @@ export async function POST(request: NextRequest) {
           
           const mergedData = {
             barcode: productData.barcode || existingProduct.barcode,
-            name: productData.name || existingProduct.name,
-            brand: productData.brand || existingProduct.brand,
-            size: productData.size || existingProduct.size,
-            category: productData.category || existingProduct.category,
-            ingredients: productData.ingredients || existingProduct.ingredients,
-            nutrition_facts: productData.nutrition_facts || existingProduct.nutrition_facts,
+            name: (steps.packaging.status === 'success' ? productData.name : null) || existingProduct.name,
+            brand: (steps.packaging.status === 'success' ? productData.brand : null) || existingProduct.brand,
+            size: (steps.packaging.status === 'success' ? productData.size : null) || existingProduct.size,
+            category: (steps.packaging.status === 'success' ? productData.category : null) || existingProduct.category,
+            ingredients: (steps.ingredients.status === 'success' ? productData.ingredients : null) || existingProduct.ingredients,
+            nutrition_facts: (steps.nutrition.status === 'success' ? productData.nutrition_facts : null) || existingProduct.nutrition_facts,
             metadata: {
               ...existingProduct.metadata,
               extraction_type: productData.metadata.extraction_type,
               extraction_steps: mergedExtractionSteps,
-              // Keep existing dimensions if new ones aren't available
+              // Only update dimensions if new ones were actually computed
               health_dimension: productData.metadata.health_dimension || existingProduct.metadata?.health_dimension,
               processing_dimension: productData.metadata.processing_dimension || existingProduct.metadata?.processing_dimension,
               allergens_dimension: productData.metadata.allergens_dimension || existingProduct.metadata?.allergens_dimension,
               // Keep other metadata fields from existing product
-              packaging_type: productData.metadata.packaging_type || existingProduct.metadata?.packaging_type,
+              packaging_type: (steps.packaging.status === 'success' ? productData.metadata.packaging_type : null) || existingProduct.metadata?.packaging_type,
               overall_confidence: productData.metadata.overall_confidence || existingProduct.metadata?.overall_confidence,
             },
           };
