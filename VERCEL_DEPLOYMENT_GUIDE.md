@@ -192,6 +192,14 @@ git push origin main
 9. Capture the image
 10. ✅ Should process and update results
 
+**Test 3c: Barcode Re-Scan with Existing Product**
+1. Scan a product without a visible barcode (incomplete scan)
+2. Tap the camera icon on the "Barcode" row, then tap "Re-Scan"
+3. Capture the barcode
+4. ✅ If a complete product with that barcode already exists in the DB, should return the full cached product
+5. ✅ Incomplete product should be cleaned up
+6. ✅ Results should show the complete product with all four extraction steps
+
 **Test 4: History**
 1. Click "History" button
 2. ✅ Should navigate to `/history`

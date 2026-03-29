@@ -6,7 +6,7 @@ A mobile-first web application that enables consumers to capture images of groce
 
 - 📸 **Camera Capture**: Use your device camera to scan grocery products (no barcode entry required)
 - 🦸 **Product Hero Mode**: Guided multi-image capture workflow (barcode → packaging → nutrition label) for complete product profiles
-- 🎯 **Targeted Re-Scan**: Re-scan individual extraction areas (barcode, product info, ingredients, nutrition) directly from the results screen
+- 🎯 **Targeted Re-Scan**: Re-scan individual extraction areas (barcode, product info, ingredients, nutrition) directly from the results screen. Barcode re-scans automatically return a complete product if one already exists in the database.
 - 🤖 **AI Analysis**: Powered by Google's Gemini 2.0 Flash with Research Agent for deep product insights
 - 🥗 **Nutrition Label Analysis**: Scan nutrition facts labels for instant health scoring, allergen detection, and ingredient analysis
 - 🏷️ **Smart Badges**: Visual indicators for Health, Sustainability, Carbon Impact, Preservatives, and Allergens

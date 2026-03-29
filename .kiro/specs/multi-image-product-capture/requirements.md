@@ -99,6 +99,7 @@ This document specifies requirements for a multi-image product capture system th
 4. THE Data_Merger SHALL populate nutritional data fields from Nutrition_Analyzer results
 5. WHEN conflicting data is detected, THE Data_Merger SHALL compare per-step confidence scores and keep the higher-confidence data for each category
 6. THE Data_Merger SHALL preserve all image references in the Product_Record
+7. WHEN a targeted barcode re-scan detects a barcode matching a complete product in the database, THE System SHALL return the complete product and clean up the incomplete record
 
 ### Requirement 7: Progressive Enhancement Prompts
 

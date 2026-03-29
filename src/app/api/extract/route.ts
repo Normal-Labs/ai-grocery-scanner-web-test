@@ -261,22 +261,66 @@ export async function POST(request: NextRequest) {
       if (targetStep === 'barcode') {
         const barcodeMatch = (typeof extractedData === 'string' ? extractedData : extractedData.barcode || responseText).match(/\b\d{8,14}\b/);
         if (barcodeMatch && isValidBarcode(barcodeMatch[0])) {
-          updateFields.barcode = barcodeMatch[0];
+          const detectedBarcode = barcodeMatch[0];
           steps.barcode.status = 'success';
-          steps.barcode.data = { barcode: barcodeMatch[0] };
+          steps.barcode.data = { barcode: detectedBarcode };
           steps.barcode.confidence = 0.9;
+
+          // Check if a complete product already exists with this barcode
+          try {
+            const { data: cachedProduct, error: cacheError } = await supabase
+              .from('products')
+              .select('*')
+              .eq('barcode', detectedBarcode)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .single();
+
+            if (!cacheError && cachedProduct && cachedProduct.id !== productId) {
+              const cachedScore = calculateCompletenessScore(cachedProduct);
+              if (cachedScore === 4) {
+                console.log(`[Extract API] 🎯 Barcode rescan found complete product in DB: ${cachedProduct.id} (score=${cachedScore})`);
+
+                // Delete the incomplete product
+                try {
+                  await supabase.from('products').delete().eq('id', productId);
+                  console.log(`[Extract API] 🗑️ Deleted incomplete product: ${productId}`);
+                } catch (deleteErr) {
+                  console.error('[Extract API] ⚠️ Failed to delete incomplete product:', deleteErr);
+                }
+
+                // Return the complete cached product
+                const totalProcessingTime = Date.now() - startTime;
+                return NextResponse.json({
+                  success: true,
+                  cached: true,
+                  steps: cachedProduct.metadata?.extraction_steps || steps,
+                  healthDimension: cachedProduct.metadata?.health_dimension,
+                  processingDimension: cachedProduct.metadata?.processing_dimension,
+                  allergensDimension: cachedProduct.metadata?.allergens_dimension,
+                  productId: cachedProduct.id,
+                  oldProductId: productId,
+                  savedToDb: true,
+                  totalProcessingTime,
+                });
+              }
+            }
+          } catch (lookupErr) {
+            console.log('[Extract API] ⚠️ Barcode lookup failed, continuing with merge:', lookupErr);
+          }
         } else {
           steps.barcode.status = 'failed';
           steps.barcode.error = barcodeMatch ? 'Barcode failed Mod-10 checksum' : 'No valid barcode detected';
         }
         steps.barcode.processingTime = extractionTime;
-        mergedSteps.barcode = steps.barcode;
+        if (shouldReplaceStep(mergedSteps.barcode, steps.barcode)) {
+          mergedSteps.barcode = steps.barcode;
+          if (steps.barcode.status === 'success') {
+            updateFields.barcode = steps.barcode.data.barcode;
+          }
+        }
       } else if (targetStep === 'packaging') {
         if (extractedData.productName) {
-          updateFields.name = extractedData.productName;
-          updateFields.brand = extractedData.brand || existingProduct.brand;
-          updateFields.size = extractedData.size || existingProduct.size;
-          updateFields.category = extractedData.category || existingProduct.category;
           steps.packaging.status = 'success';
           steps.packaging.data = extractedData;
           steps.packaging.confidence = extractedData.confidence || 0.5;
@@ -285,14 +329,21 @@ export async function POST(request: NextRequest) {
           steps.packaging.error = 'No product name detected';
         }
         steps.packaging.processingTime = extractionTime;
-        mergedSteps.packaging = steps.packaging;
+        if (shouldReplaceStep(mergedSteps.packaging, steps.packaging)) {
+          mergedSteps.packaging = steps.packaging;
+          if (steps.packaging.status === 'success') {
+            updateFields.name = extractedData.productName;
+            updateFields.brand = extractedData.brand || existingProduct.brand;
+            updateFields.size = extractedData.size || existingProduct.size;
+            updateFields.category = extractedData.category || existingProduct.category;
+          }
+        }
       } else if (targetStep === 'ingredients') {
         if (extractedData.ingredients?.length > 0) {
           const ingredients = [...extractedData.ingredients];
           if (ingredients[0]) {
             ingredients[0] = ingredients[0].replace(/^INGREDIENTS:\s*/i, '').replace(/^Ingredients:\s*/i, '').trim();
           }
-          updateFields.ingredients = ingredients;
           steps.ingredients.status = 'success';
           steps.ingredients.data = extractedData;
           steps.ingredients.confidence = extractedData.confidence || 0.5;
@@ -301,10 +352,14 @@ export async function POST(request: NextRequest) {
           steps.ingredients.error = 'No ingredients found';
         }
         steps.ingredients.processingTime = extractionTime;
-        mergedSteps.ingredients = steps.ingredients;
+        if (shouldReplaceStep(mergedSteps.ingredients, steps.ingredients)) {
+          mergedSteps.ingredients = steps.ingredients;
+          if (steps.ingredients.status === 'success') {
+            updateFields.ingredients = extractedData.ingredients;
+          }
+        }
       } else if (targetStep === 'nutrition') {
         if (extractedData.serving_size && extractedData.macros) {
-          updateFields.nutrition_facts = extractedData;
           steps.nutrition.status = 'success';
           steps.nutrition.data = extractedData;
           steps.nutrition.confidence = extractedData.confidence || 0.5;
@@ -313,7 +368,12 @@ export async function POST(request: NextRequest) {
           steps.nutrition.error = 'Incomplete nutrition facts';
         }
         steps.nutrition.processingTime = extractionTime;
-        mergedSteps.nutrition = steps.nutrition;
+        if (shouldReplaceStep(mergedSteps.nutrition, steps.nutrition)) {
+          mergedSteps.nutrition = steps.nutrition;
+          if (steps.nutrition.status === 'success') {
+            updateFields.nutrition_facts = extractedData;
+          }
+        }
       }
 
       // Update the product with only the targeted fields
