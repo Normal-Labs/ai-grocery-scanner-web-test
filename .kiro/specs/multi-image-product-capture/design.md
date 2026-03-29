@@ -701,9 +701,9 @@ After analyzing all acceptance criteria, I identified several opportunities to c
 
 **Validates: Requirements 6.2, 6.3, 6.4**
 
-### Property 23: Conflict Resolution Recency
+### Property 23: Confidence-Based Conflict Resolution
 
-*For any* conflicting data between images, the Data_Merger should prioritize the most recently captured image data.
+*For any* conflicting data between images, the Data_Merger should compare per-step confidence scores and keep the higher-confidence extraction for each category. If confidence scores are equal, the most recently captured data wins.
 
 **Validates: Requirements 6.5**
 

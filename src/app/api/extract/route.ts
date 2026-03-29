@@ -64,6 +64,26 @@ function shouldUpdateProduct(existingData: any, newData: any): boolean {
   return newScore >= existingScore;
 }
 
+/**
+ * Compare confidence between existing and new extraction step.
+ * Returns true if the new step should replace the existing one.
+ * - If existing step doesn't exist or wasn't successful, new data wins.
+ * - If new step failed, existing data wins.
+ * - If both succeeded, higher confidence wins.
+ */
+function shouldReplaceStep(existingStep: any, newStep: any): boolean {
+  // New step failed — keep existing
+  if (!newStep || newStep.status !== 'success') return false;
+  // No existing step or it failed — take new
+  if (!existingStep || existingStep.status !== 'success') return true;
+  // Both succeeded — compare confidence (default 0.5 if missing)
+  const existingConf = existingStep.confidence ?? 0.5;
+  const newConf = newStep.confidence ?? 0.5;
+  const replace = newConf >= existingConf;
+  console.log(`[Test All API] 🔍 Confidence comparison: existing=${existingConf}, new=${newConf}, replace=${replace}`);
+  return replace;
+}
+
 interface AllExtractionRequest {
   image: string; // base64 image data
   productId?: string; // Optional: ID of product to update (for completing incomplete scans)
@@ -805,32 +825,37 @@ export async function POST(request: NextRequest) {
           console.log('[Test All API] ⚠️ Product not found, will create new entry instead');
           // Fall through to normal insert logic (don't use productId anymore)
         } else {
-          // Merge new data with existing data (keep existing data where new data is null)
-          // For extraction_steps, only update if new step is successful
-          const mergedExtractionSteps = { ...existingProduct.metadata?.extraction_steps };
+          // Merge new data with existing data using confidence-based comparison
+          // For each extraction step, only replace if new data has higher confidence
+          const existingSteps = existingProduct.metadata?.extraction_steps || {};
+          const newSteps = productData.metadata.extraction_steps;
+          const mergedExtractionSteps = { ...existingSteps };
           
-          // Only update extraction steps if the new step is successful
-          if (productData.metadata.extraction_steps.barcode?.status === 'success') {
-            mergedExtractionSteps.barcode = productData.metadata.extraction_steps.barcode;
-          }
-          if (productData.metadata.extraction_steps.packaging?.status === 'success') {
-            mergedExtractionSteps.packaging = productData.metadata.extraction_steps.packaging;
-          }
-          if (productData.metadata.extraction_steps.ingredients?.status === 'success') {
-            mergedExtractionSteps.ingredients = productData.metadata.extraction_steps.ingredients;
-          }
-          if (productData.metadata.extraction_steps.nutrition?.status === 'success') {
-            mergedExtractionSteps.nutrition = productData.metadata.extraction_steps.nutrition;
-          }
+          const useNewBarcode = shouldReplaceStep(existingSteps.barcode, newSteps.barcode);
+          const useNewPackaging = shouldReplaceStep(existingSteps.packaging, newSteps.packaging);
+          const useNewIngredients = shouldReplaceStep(existingSteps.ingredients, newSteps.ingredients);
+          const useNewNutrition = shouldReplaceStep(existingSteps.nutrition, newSteps.nutrition);
+
+          console.log('[Test All API] 🔀 Merge decisions:', {
+            barcode: useNewBarcode ? 'use new' : 'keep existing',
+            packaging: useNewPackaging ? 'use new' : 'keep existing',
+            ingredients: useNewIngredients ? 'use new' : 'keep existing',
+            nutrition: useNewNutrition ? 'use new' : 'keep existing',
+          });
+
+          if (useNewBarcode) mergedExtractionSteps.barcode = newSteps.barcode;
+          if (useNewPackaging) mergedExtractionSteps.packaging = newSteps.packaging;
+          if (useNewIngredients) mergedExtractionSteps.ingredients = newSteps.ingredients;
+          if (useNewNutrition) mergedExtractionSteps.nutrition = newSteps.nutrition;
           
           const mergedData = {
-            barcode: productData.barcode || existingProduct.barcode,
-            name: (steps.packaging.status === 'success' ? productData.name : null) || existingProduct.name,
-            brand: (steps.packaging.status === 'success' ? productData.brand : null) || existingProduct.brand,
-            size: (steps.packaging.status === 'success' ? productData.size : null) || existingProduct.size,
-            category: (steps.packaging.status === 'success' ? productData.category : null) || existingProduct.category,
-            ingredients: (steps.ingredients.status === 'success' ? productData.ingredients : null) || existingProduct.ingredients,
-            nutrition_facts: (steps.nutrition.status === 'success' ? productData.nutrition_facts : null) || existingProduct.nutrition_facts,
+            barcode: (useNewBarcode ? productData.barcode : null) || existingProduct.barcode,
+            name: (useNewPackaging ? productData.name : null) || existingProduct.name,
+            brand: (useNewPackaging ? productData.brand : null) || existingProduct.brand,
+            size: (useNewPackaging ? productData.size : null) || existingProduct.size,
+            category: (useNewPackaging ? productData.category : null) || existingProduct.category,
+            ingredients: (useNewIngredients ? productData.ingredients : null) || existingProduct.ingredients,
+            nutrition_facts: (useNewNutrition ? productData.nutrition_facts : null) || existingProduct.nutrition_facts,
             metadata: {
               ...existingProduct.metadata,
               extraction_type: productData.metadata.extraction_type,
@@ -839,8 +864,8 @@ export async function POST(request: NextRequest) {
               health_dimension: productData.metadata.health_dimension || existingProduct.metadata?.health_dimension,
               processing_dimension: productData.metadata.processing_dimension || existingProduct.metadata?.processing_dimension,
               allergens_dimension: productData.metadata.allergens_dimension || existingProduct.metadata?.allergens_dimension,
-              // Keep other metadata fields from existing product
-              packaging_type: (steps.packaging.status === 'success' ? productData.metadata.packaging_type : null) || existingProduct.metadata?.packaging_type,
+              // Keep other metadata fields from existing product unless new packaging is better
+              packaging_type: (useNewPackaging ? productData.metadata.packaging_type : null) || existingProduct.metadata?.packaging_type,
               overall_confidence: productData.metadata.overall_confidence || existingProduct.metadata?.overall_confidence,
             },
           };

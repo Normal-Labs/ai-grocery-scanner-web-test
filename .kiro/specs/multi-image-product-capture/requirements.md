@@ -97,7 +97,7 @@ This document specifies requirements for a multi-image product capture system th
 2. THE Data_Merger SHALL populate product identification fields from Barcode_Analyzer results
 3. THE Data_Merger SHALL populate product metadata fields from Packaging_Analyzer results
 4. THE Data_Merger SHALL populate nutritional data fields from Nutrition_Analyzer results
-5. WHEN conflicting data is detected, THE Data_Merger SHALL prioritize the most recently captured image data
+5. WHEN conflicting data is detected, THE Data_Merger SHALL compare per-step confidence scores and keep the higher-confidence data for each category
 6. THE Data_Merger SHALL preserve all image references in the Product_Record
 
 ### Requirement 7: Progressive Enhancement Prompts
@@ -209,3 +209,4 @@ This document specifies requirements for a multi-image product capture system th
 3. WHEN nutritional data conflicts with product category expectations, THE System SHALL flag the Product_Record for review
 4. THE System SHALL store all conflicting values with their source Image_Type for manual review
 5. THE System SHALL apply a confidence score to merged data based on consistency validation results
+6. WHEN merging extraction steps, THE System SHALL compare the confidence score of the existing step against the new step and keep whichever has higher confidence

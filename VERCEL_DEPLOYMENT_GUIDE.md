@@ -177,7 +177,7 @@ git push origin main
 3. Click "Complete Scan"
 4. ✅ Should scroll to top
 5. Capture barcode
-6. ✅ Should merge data correctly
+6. ✅ Should merge data using confidence-based comparison (higher confidence wins per category)
 7. ✅ Should show complete product
 
 **Test 3b: Targeted Re-Scan**
