@@ -51,15 +51,11 @@ export default function HomePage() {
           let grade = '—';
           if (scores.length > 0) {
             const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-            if (avg >= 90) grade = 'A+';
-            else if (avg >= 85) grade = 'A';
-            else if (avg >= 80) grade = 'A-';
-            else if (avg >= 75) grade = 'B+';
-            else if (avg >= 70) grade = 'B';
-            else if (avg >= 65) grade = 'B-';
-            else if (avg >= 60) grade = 'C+';
-            else if (avg >= 55) grade = 'C';
-            else grade = 'D';
+            if (avg >= 90) grade = 'A';
+            else if (avg >= 80) grade = 'B';
+            else if (avg >= 70) grade = 'C';
+            else if (avg >= 60) grade = 'D';
+            else grade = 'F';
           }
           
           // Get emoji based on product name

@@ -71,20 +71,16 @@ export function HistoryScreen({ history, onViewScan, onClearHistory }: HistorySc
     
     const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
     
-    if (avg >= 90) return 'A+';
-    if (avg >= 85) return 'A';
-    if (avg >= 80) return 'A-';
-    if (avg >= 75) return 'B+';
-    if (avg >= 70) return 'B';
-    if (avg >= 65) return 'B-';
-    if (avg >= 60) return 'C+';
-    if (avg >= 55) return 'C';
-    return 'D';
+    if (avg >= 90) return 'A';
+    if (avg >= 80) return 'B';
+    if (avg >= 70) return 'C';
+    if (avg >= 60) return 'D';
+    return 'F';
   };
 
   const getScoreColor = (grade: string): string => {
-    if (grade.startsWith('A')) return 'text-success';
-    if (grade.startsWith('B')) return 'text-warning';
+    if (grade === 'A' || grade === 'B') return 'text-success';
+    if (grade === 'C' || grade === 'D') return 'text-warning';
     return 'text-destructive';
   };
 
