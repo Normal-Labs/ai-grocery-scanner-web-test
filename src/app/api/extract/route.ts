@@ -376,51 +376,28 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Update the product with only the targeted fields
-      const { data: updatedProduct, error: updateError } = await supabase
-        .from('products')
-        .update({
-          ...updateFields,
-          updated_at: new Date().toISOString(),
-          metadata: {
-            ...existingProduct.metadata,
-            extraction_steps: mergedSteps,
-            last_update_reason: `targeted_rescan_${targetStep}`,
-          },
-        })
-        .eq('id', productId)
-        .select('*')
-        .single();
-
-      if (updateError) {
-        console.error('[Extract API] ❌ Targeted update failed:', updateError);
-        return NextResponse.json(
-          { success: false, error: 'Database update failed', steps, savedToDb: false, totalProcessingTime: Date.now() - startTime },
-          { status: 500 }
-        );
-      }
-
-      console.log(`[Extract API] 💾 Targeted rescan saved for ${targetStep}`);
-
       // DIMENSION ANALYSIS after targeted rescan:
-      // Check if we now have enough data to run (or re-run) dimension analysis.
+      // Check if we now have enough data to run dimension analysis for the first time.
       // Use mergedSteps which reflect the combined state of existing + new data.
-      let healthDimension: HealthDimensionResult | undefined = updatedProduct.metadata?.health_dimension;
-      let processingDimension: ProcessingDimensionResult | undefined = updatedProduct.metadata?.processing_dimension;
-      let allergensDimension: AllergensDimensionResult | undefined = updatedProduct.metadata?.allergens_dimension;
+      // Always preserve existing dimensions — only compute ones that are missing.
+      let healthDimension: HealthDimensionResult | undefined = existingProduct.metadata?.health_dimension;
+      let processingDimension: ProcessingDimensionResult | undefined = existingProduct.metadata?.processing_dimension;
+      let allergensDimension: AllergensDimensionResult | undefined = existingProduct.metadata?.allergens_dimension;
 
       const ingredientsReady = mergedSteps.ingredients?.status === 'success';
       const nutritionReady = mergedSteps.nutrition?.status === 'success';
-      const needsDimensionAnalysis = ingredientsReady && (
-        !healthDimension || !processingDimension || !allergensDimension
-      );
+      const missingHealth = !healthDimension;
+      const missingProcessing = !processingDimension;
+      const missingAllergens = !allergensDimension;
+      const needsDimensionAnalysis = ingredientsReady && (missingHealth || missingProcessing || missingAllergens);
 
       if (needsDimensionAnalysis) {
-        console.log('[Extract API] 🔄 Running dimension analysis after targeted rescan');
-        const dimensionMetadataUpdates: any = {};
+        console.log('[Extract API] 🔄 Running dimension analysis after targeted rescan', {
+          missingHealth, missingProcessing, missingAllergens,
+        });
 
         // Health dimension: requires ingredients + nutrition
-        if (ingredientsReady && nutritionReady && !healthDimension) {
+        if (ingredientsReady && nutritionReady && missingHealth) {
           try {
             console.log('[Extract API] 🏥 Running health dimension analysis');
             const healthStart = Date.now();
@@ -446,7 +423,6 @@ export async function POST(request: NextRequest) {
                 key_factors: healthData.key_factors,
                 confidence: healthData.confidence,
               };
-              dimensionMetadataUpdates.health_dimension = healthDimension;
               console.log('[Extract API] ✅ Health dimension completed in', Date.now() - healthStart, 'ms, score:', healthDimension.score);
             }
           } catch (e) {
@@ -455,7 +431,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Processing dimension: requires ingredients
-        if (ingredientsReady && !processingDimension) {
+        if (ingredientsReady && missingProcessing) {
           try {
             console.log('[Extract API] 🔬 Running processing dimension analysis');
             const processingStart = Date.now();
@@ -487,7 +463,6 @@ export async function POST(request: NextRequest) {
                 },
                 confidence: processingData.confidence,
               };
-              dimensionMetadataUpdates.processing_dimension = processingDimension;
               console.log('[Extract API] ✅ Processing dimension completed in', Date.now() - processingStart, 'ms, score:', processingDimension.score);
             }
           } catch (e) {
@@ -496,7 +471,7 @@ export async function POST(request: NextRequest) {
         }
 
         // Allergens dimension: requires ingredients
-        if (ingredientsReady && !allergensDimension) {
+        if (ingredientsReady && missingAllergens) {
           try {
             console.log('[Extract API] 🥜 Running allergens dimension analysis');
             const allergensStart = Date.now();
@@ -528,36 +503,10 @@ export async function POST(request: NextRequest) {
                 },
                 confidence: allergensData.confidence,
               };
-              dimensionMetadataUpdates.allergens_dimension = allergensDimension;
               console.log('[Extract API] ✅ Allergens dimension completed in', Date.now() - allergensStart, 'ms, score:', allergensDimension.score);
             }
           } catch (e) {
             console.error('[Extract API] ❌ Allergens dimension error:', e);
-          }
-        }
-
-        // Persist new dimension results to the product
-        if (Object.keys(dimensionMetadataUpdates).length > 0) {
-          try {
-            const { error: dimUpdateError } = await supabase
-              .from('products')
-              .update({
-                updated_at: new Date().toISOString(),
-                metadata: {
-                  ...updatedProduct.metadata,
-                  ...dimensionMetadataUpdates,
-                  last_update_reason: `targeted_rescan_${targetStep}_with_dimensions`,
-                },
-              })
-              .eq('id', productId);
-
-            if (dimUpdateError) {
-              console.error('[Extract API] ❌ Failed to save dimension results:', dimUpdateError);
-            } else {
-              console.log('[Extract API] 💾 Dimension results saved to product');
-            }
-          } catch (e) {
-            console.error('[Extract API] ❌ Error saving dimension results:', e);
           }
         }
       } else if (!ingredientsReady) {
@@ -566,14 +515,53 @@ export async function POST(request: NextRequest) {
         console.log('[Extract API] ⏭️ Skipping dimension analysis (already computed)');
       }
 
+      // Single atomic update: extraction step + any new dimension results
+      // Explicitly preserve existing dimensions — only set new ones if they were just computed
+      const finalMetadata = {
+        ...existingProduct.metadata,
+        extraction_steps: mergedSteps,
+        // Always preserve existing dimensions; only override with newly computed values
+        health_dimension: healthDimension || existingProduct.metadata?.health_dimension,
+        processing_dimension: processingDimension || existingProduct.metadata?.processing_dimension,
+        allergens_dimension: allergensDimension || existingProduct.metadata?.allergens_dimension,
+        last_update_reason: needsDimensionAnalysis
+          ? `targeted_rescan_${targetStep}_with_dimensions`
+          : `targeted_rescan_${targetStep}`,
+      };
+
+      const { data: updatedProduct, error: updateError } = await supabase
+        .from('products')
+        .update({
+          ...updateFields,
+          updated_at: new Date().toISOString(),
+          metadata: finalMetadata,
+        })
+        .eq('id', productId)
+        .select('*')
+        .single();
+
+      if (updateError) {
+        console.error('[Extract API] ❌ Targeted update failed:', updateError);
+        return NextResponse.json(
+          { success: false, error: 'Database update failed', steps, savedToDb: false, totalProcessingTime: Date.now() - startTime },
+          { status: 500 }
+        );
+      }
+
+      console.log(`[Extract API] 💾 Targeted rescan saved for ${targetStep}`, {
+        hasHealth: !!updatedProduct.metadata?.health_dimension,
+        hasProcessing: !!updatedProduct.metadata?.processing_dimension,
+        hasAllergens: !!updatedProduct.metadata?.allergens_dimension,
+      });
+
       const totalProcessingTime = Date.now() - startTime;
       return NextResponse.json({
         success: true,
         cached: false,
         steps: updatedProduct.metadata?.extraction_steps || mergedSteps,
-        healthDimension,
-        processingDimension,
-        allergensDimension,
+        healthDimension: updatedProduct.metadata?.health_dimension,
+        processingDimension: updatedProduct.metadata?.processing_dimension,
+        allergensDimension: updatedProduct.metadata?.allergens_dimension,
         productId: updatedProduct.id,
         savedToDb: true,
         totalProcessingTime,
